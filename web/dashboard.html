@@ -1,0 +1,1860 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ESP32 Dashboard - Light Trap</title>
+    <link rel="stylesheet" type="text/css" href="/style.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>🌿 LightTrap Dashboard</h1>
+            <div class="status">✓ Sistema Activo</div>
+        </header>
+
+        <div class="tabs">
+            <button class="tab-button active" onclick="openTab(event,'dashboard')">Dashboard</button>
+            <button class="tab-button" onclick="openTab(event,'config')">Configuración</button>
+            <button class="tab-button" onclick="openTab(event,'files')">Archivos</button>
+        </div>
+
+        <div id="apCloseWarning" class="ap-close-warning" style="display: none;">
+            <span><span id="apCloseWarningPrefix">⚠️ La conexión se cerrará en</span> <strong id="apCloseCountdown">--:--</strong></span>
+            <div class="ap-close-warning-actions">
+                <button class="ap-close-warning-btn" onclick="postponeConnection()">Posponer 5 min</button>
+                <button class="ap-close-warning-dismiss" onclick="dismissApWarning()">✕</button>
+            </div>
+        </div>
+
+        <div id="dashboard" class="tab-content active">
+            <div id="manualBanner" class="manual-banner" style="display: none;">
+                <span class="manual-banner-icon">⚠️</span>
+                <div class="manual-banner-text">
+                    <div class="manual-banner-title">Modo manual activo</div>
+                    <div class="manual-banner-subtitle" id="manualBannerSubtitle">Hay cargas controladas manualmente.</div>
+                </div>
+                <button class="manual-banner-btn" onclick="clearManualMode()">Salir</button>
+            </div>
+
+            <div id="lowBatteryBanner" class="manual-banner" style="display: none;">
+                <span class="manual-banner-icon">🔋</span>
+                <div class="manual-banner-text">
+                    <div class="manual-banner-title">Batería baja: protección activa</div>
+                    <div class="manual-banner-subtitle" id="lowBatterySubtitle">Luz y ventiladores bloqueados.</div>
+                </div>
+            </div>
+
+            <div id="chargeModeBanner" class="manual-banner" style="display: none;">
+                <span class="manual-banner-icon">🔌</span>
+                <div class="manual-banner-text">
+                    <div class="manual-banner-title">Modo solo carga activo</div>
+                    <div class="manual-banner-subtitle">Luz y ventiladores no operan en automático; el equipo solo despierta para el AP y para registrar la batería. El control manual sigue disponible.</div>
+                </div>
+                <button class="manual-banner-btn" onclick="setChargeMode(false)">Desactivar</button>
+            </div>
+
+            <div class="monitoring-section">
+                <h2>Datos en Tiempo Real</h2>
+                <div class="realtime-grid">
+                    <div class="realtime-card">
+                        <span class="label">Fecha</span>
+                        <span id="dateValue">---</span>
+                    </div>
+                    <div class="realtime-card">
+                        <span class="label">Hora</span>
+                        <span id="timeValue">---</span>
+                    </div>
+                </div>
+
+                <div class="realtime-values-compact">
+                    <div class="value-card-mini volt" style="border-top: 3px solid #2ecc71;">
+                        <span class="v-icon">⚡</span>
+                        <span class="v-label">Voltaje</span>
+                        <span class="v-data"><span id="voltageValue">--</span><small>V</small></span>
+                    </div>
+                    <div class="value-card-mini" id="batteryPctCard" style="border-top: 3px solid #2ecc71;"
+                         title="Estimado a partir del voltaje (batería Li-ion 3S). Es más preciso en reposo: con la luz encendida marca menos y mientras carga con el sol marca más.">
+                        <span class="v-icon">🔋</span>
+                        <span class="v-label">Batería (aprox.)</span>
+                        <span class="v-data">≈ <span id="batteryPctValue">--</span><small>%</small></span>
+                    </div>
+                    <div class="value-card-mini curr" style="border-top: 3px solid #2ecc71;">
+                        <span class="v-icon">🔌</span>
+                        <span class="v-label">Corriente</span>
+                        <span class="v-data"><span id="currentValue">--</span><small>mA</small></span>
+                    </div>
+                    <div class="value-card-mini pwr" style="border-top: 3px solid #2ecc71;">
+                        <span class="v-icon">🚀</span>
+                        <span class="v-label">Potencia</span>
+                        <span class="v-data"><span id="powerValue">--</span><small>W</small></span>
+                    </div>
+                    <div class="value-card-mini mini-highlight">
+                        <span class="v-icon">🔋</span>
+                        <span class="v-label">Energía hoy</span>
+                        <span class="v-data"><span id="energyValue">--</span><small>Wh</small></span>
+                    </div>
+                </div>
+
+                <div class="value-card temp-hero" style="border-top: 3px solid #9b59b6; margin-bottom: 16px;">
+                    <div class="value-card-header">
+                        <div>
+                            <div class="value-label">🌡️ Temperatura</div>
+                            <div class="value-display" id="tempValue">--</div>
+                            <div class="value-unit">°C</div>
+                        </div>
+                        <span class="temp-risk-pill" id="tempRiskPill">--</span>
+                    </div>
+                </div>
+
+                <div class="realtime-values-compact" style="margin-bottom: 0;">
+                    <div class="value-card-mini">
+                        <span class="v-icon">💧</span>
+                        <span class="v-label">Humedad</span>
+                        <span class="v-data"><span id="humValue">--</span><small>%</small></span>
+                    </div>
+                    <div class="value-card-mini">
+                        <span class="v-icon">📊</span>
+                        <span class="v-label">Presión</span>
+                        <span class="v-data"><span id="presValue">--</span><small>hPa</small></span>
+                    </div>
+                    <div class="value-card-mini">
+                        <span class="v-icon">📈</span>
+                        <span class="v-label">Altitud</span>
+                        <span class="v-data"><span id="altValue">--</span><small>m</small></span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="monitoring-section">
+                <h2>Actividad por Área <span class="section-subtitle">última ventana de 5 min</span></h2>
+                <div class="area-activity-list" id="areaActivityList">
+                    <!-- Generado dinámicamente por actualizarAreaActivity() -->
+                </div>
+            </div>
+
+            <div class="monitoring-section">
+                <h2>Sensores IR <span class="section-subtitle">estado en vivo</span></h2>
+                <div class="ir-sensor-grid" id="irSensorGrid">
+                    <!-- Generado dinámicamente por renderIrSensorGrid() -->
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="control-header-row">
+                    <h2>Control de Cargas</h2>
+                    <span class="control-header-note" id="maxFansNote">Máx. simultáneos: --/--</span>
+                </div>
+                <div class="control-list">
+                    <!-- LED -->
+                    <div class="control-row">
+                        <span class="control-row-icon">💡</span>
+                        <div class="control-row-text">
+                            <div class="control-row-title">Luz Atractora</div>
+                            <div class="control-row-subtitle"><span class="control-card-mode auto" id="ledMode">Automático</span></div>
+                        </div>
+                        <span id="led-state" class="badge badge-off">OFF</span>
+                    </div>
+
+                    <!-- VENTILADORES -->
+                    <div class="control-row">
+                        <span class="control-row-icon">💨</span>
+                        <div class="control-row-text">
+                            <div class="control-row-title">Ventilador 1</div>
+                            <div class="control-row-subtitle"><span class="control-card-mode auto" id="fanMode-0">Automático</span> · Área 2</div>
+                        </div>
+                        <span id="fan-0" class="badge badge-off">OFF</span>
+                    </div>
+
+                    <div class="control-row">
+                        <span class="control-row-icon">💨</span>
+                        <div class="control-row-text">
+                            <div class="control-row-title">Ventilador 2</div>
+                            <div class="control-row-subtitle"><span class="control-card-mode auto" id="fanMode-1">Automático</span> · Área 2</div>
+                        </div>
+                        <span id="fan-1" class="badge badge-off">OFF</span>
+                    </div>
+
+                    <div class="control-row">
+                        <span class="control-row-icon">💨</span>
+                        <div class="control-row-text">
+                            <div class="control-row-title">Ventilador 3</div>
+                            <div class="control-row-subtitle"><span class="control-card-mode auto" id="fanMode-2">Automático</span> · Área 3</div>
+                        </div>
+                        <span id="fan-2" class="badge badge-off">OFF</span>
+                    </div>
+
+                    <div class="control-row">
+                        <span class="control-row-icon">💨</span>
+                        <div class="control-row-text">
+                            <div class="control-row-title">Ventilador 4</div>
+                            <div class="control-row-subtitle"><span class="control-card-mode auto" id="fanMode-3">Automático</span> · Área 3</div>
+                        </div>
+                        <span id="fan-3" class="badge badge-off">OFF</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="monitoring-section">
+                <h2>Historial de Datos</h2>
+            
+                <div class="control-section">
+                    <div class="control-grid">
+                        <div class="info-group">
+                            <label for="origenGraficas">Origen</label>
+                            <select id="origenGraficas" onchange="cambiarOrigen(this.value)">
+                                <option value="sd">Tarjeta SD</option>
+                                <option value="flash">Memoria interna</option>
+                            </select>
+                        </div>
+                        <div class="info-group">
+                            <label for="directorio">Carpeta de Datos</label>
+                            <select id="directorio" onchange="cargarArchivos()">
+                                <option value="">Seleccionar carpeta...</option>
+                                <option value="BME_Data">BME_Data</option>
+                                <option value="INA_Data">INA_Data</option>
+                                <option value="Fans_Data">Fans_Data</option>
+                                <option value="BAT_Data">BAT_Data</option>
+                            </select>
+                        </div>
+                        <div class="info-group">
+                            <label for="subdir">Mes</label>
+                            <select id="subdir" onchange="cargarArchivosMes()">
+                                <option value="">Seleccionar mes...</option>
+                            </select>
+                        </div>
+                        <div class="info-group">
+                            <label for="archivo">Archivo</label>
+                            <select id="archivo">
+                                <option value="">Seleccionar archivo...</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="info-group">
+                        <label>&nbsp;</label>
+                        <button class="tab-buttons" onclick="cargarDatos()">📊 Cargar Gráfica</button>
+                    </div>
+                    <div class="button-group">
+                        <button class="tab-buttons" onclick="descargarArchivo()">⬇️ Descargar CSV</button>
+                        <button id="downloadChartBtn" class="tab-buttons" onclick="descargarGrafica()" style="display: none;">📸 Descargar Gráfica</button>
+                    </div>
+                </div>
+
+                <div id="messageContainer"></div>
+
+                <div class="chart-controls" id="chartControls" style="display: none;">
+                    <div class="chart-options" id="chartOptions">
+                        
+                        <div id="groupBME" style="display: flex; gap: 15px;">
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="showTemp" checked onchange="actualizarGrafica()">
+                                <label for="showTemp">Temperatura</label>
+                            </div>
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="showHum" checked onchange="actualizarGrafica()">
+                                <label for="showHum">Humedad</label>
+                            </div>
+                        </div>
+                        <div id="groupINA" style="display: none; gap: 15px;">
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="showPot" checked onchange="actualizarGrafica()">
+                                <label for="showVolt">Potencia</label>
+                            </div>
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="showEner" checked onchange="actualizarGrafica()">
+                                <label for="showEner">Energía</label>
+                            </div>
+                        </div>
+                        <div id="groupBAT" style="display: none; gap: 15px;">
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="showVbat" checked onchange="actualizarGrafica()">
+                                <label for="showVbat">Voltaje batería</label>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <div class="chart-controls" id="eventControls" style="display: none;">
+                    <div class="chart-options" id="eventChartOptions">
+                        <button class="chart-type-btn active" data-chart="hourly">
+                            🔥 Mapa de Calor
+                        </button>
+                        <button class="chart-type-btn" data-chart="area">
+                            📊 Distribución por Área
+                        </button>
+                    </div>
+                </div>
+
+                <div id="chartsContainer" style="display: none;">
+                    <div class="chart-container" id="chartContainer">
+                        <canvas id="myChart"></canvas>
+                    </div>
+                    <div class="chart-container" id="hourlyChartContainer" style="display: none;">
+                        <h3>🔥 Mapa de Calor por Hora</h3>
+                        <canvas id="hourlyChart"></canvas>
+                    </div>
+                    <div class="chart-container" id="areaChartContainer" style="display: none;">
+                        <h3>📊 Distribución por Área</h3>
+                        <canvas id="areaChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="button-group" id="downloadGroup" style="display: none; margin-top: 20px;">
+                    <button id="downloadChartBtn" onclick="descargarGraficaActual()">📥 Descargar Gráfica</button>
+                </div>
+            </div>
+        </div>
+    
+        <div id="config" class="tab-content">
+            <div class="card">
+                <h3>Energía y pantalla</h3>
+                <div class="control-item">
+                    <div style="flex: 1; margin-right: 12px;">
+                        <span>Modo solo carga</span>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Sin luz ni ventiladores automáticos: solo AP y registro de batería, para verificar la carga.</div>
+                    </div>
+                    <button id="btn-charge-mode" class="toggle-btn off" style="flex-shrink: 0;" onclick="toggleChargeMode()">OFF</button>
+                </div>
+                <div class="control-item">
+                    <div style="flex: 1; margin-right: 12px;">
+                        <span>Pantalla OLED</span>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Apagada ahorra corriente con la tapa cerrada. El botón de pantalla la enciende 2 min.</div>
+                    </div>
+                    <button id="btn-oled" class="toggle-btn off" style="flex-shrink: 0;" onclick="toggleOled()">OFF</button>
+                </div>
+            </div>
+            <div class="card">
+                <div class="manual-indicator" id="manualIndicator">
+                    MODO AUTOMÁTICO
+                </div>
+                <button class="exit-manual-btn" onclick="clearManualMode()">
+                    Salir del Modo Manual
+                </button>
+
+                <div class="control-item">
+                    <span>LED</span>
+                    <button id="btn-led" class="toggle-btn off" onclick="toggleLED()">OFF</button>
+                </div>
+                <div class="control-item">
+                    <span>Ventilador 1</span>
+                    <button id="btn-fan-0" class="toggle-btn off" onclick="toggleFan(0)">OFF</button>
+                </div>
+                <div class="control-item">
+                    <span>Ventilador 2</span>
+                    <button id="btn-fan-1" class="toggle-btn off" onclick="toggleFan(1)">OFF</button>
+                </div>
+                <div class="control-item">
+                    <span>Ventilador 3</span>
+                    <button id="btn-fan-2" class="toggle-btn off" onclick="toggleFan(2)">OFF</button>
+                </div>
+                <div class="control-item">
+                    <span>Ventilador 4</span>
+                    <button id="btn-fan-3" class="toggle-btn off" onclick="toggleFan(3)">OFF</button>   
+                </div>
+            </div>
+            <div class="card">
+                <h3>Parámetros de Captura</h3>
+                <div class="info-group">
+                    <label style="display: flex; justify-content: space-between; align-items: center; color: var(--text-primary); font-weight: 600; margin-bottom: 12px; font-size: 14px;">
+                        <span>Tiempo Ventiladores:</span>
+                        <span style="background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%); color: white; padding: 4px 12px; border-radius: 15px; font-size: 12px; font-weight: 700; min-width: 50px; text-align: center;" id="valFan">--</span>
+                    </label>
+                    <input type="range" id="fanDurInput" min="1" max="10" step="1" 
+                        oninput="document.getElementById('valFan').textContent = this.value + ' min'">
+                    <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-secondary); margin-top: 6px;">
+                        <span>1 min</span><span>10 min</span>
+                    </div>
+                </div>
+
+                <div class="info-group" style="margin-top: 24px;">
+                    <label style="display: flex; justify-content: space-between; align-items: center; color: var(--text-primary); font-weight: 600; margin-bottom: 12px; font-size: 14px;">
+                        <span>Umbral de Insectos:</span>
+                        <span style="background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%); color: white; padding: 4px 12px; border-radius: 15px; font-size: 12px; font-weight: 700; min-width: 50px; text-align: center;" id="valThres">--</span>
+                    </label>
+                    <input type="range" id="thresholdInput" min="1" max="30" step="1"
+                        oninput="document.getElementById('valThres').textContent = this.value + ' det.'">
+                    <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-secondary); margin-top: 6px;">
+                        <span>1 det.</span><span>30 det.</span>
+                    </div>
+                </div>
+
+                <div class="info-group" style="margin-top: 24px;">
+                    <label style="display: flex; justify-content: space-between; align-items: center; color: var(--text-primary); font-weight: 600; margin-bottom: 12px; font-size: 14px;">
+                        <span>Máx. Ventiladores Simultáneos:</span>
+                        <span style="background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%); color: white; padding: 4px 12px; border-radius: 15px; font-size: 12px; font-weight: 700; min-width: 50px; text-align: center;" id="valMaxFans">--</span>
+                    </label>
+                    <input type="range" id="maxFansInput" min="1" max="4" step="1"
+                        oninput="document.getElementById('valMaxFans').textContent = this.value">
+                    <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-secondary); margin-top: 6px;">
+                        <span>1</span><span>4</span>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <h3>Fecha y Hora del Sistema (RTC)</h3>
+                <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+                    Hora actual del RTC: <strong id="rtcCurrentTime">--</strong>
+                </p>
+                <button onclick="syncRtcWithDevice()" style="width: 100%;">🕒 Usar hora de este dispositivo</button>
+
+                <div class="control-section" style="margin-top: 20px; margin-bottom: 0;">
+                    <div class="info-group">
+                        <label for="rtcDateTimeInput">Ajustar manualmente</label>
+                        <input type="datetime-local" id="rtcDateTimeInput">
+                    </div>
+                    <button onclick="saveRtcManual()" style="width: 100%; margin-top: 16px;">Guardar hora manual</button>
+                </div>
+            </div>
+            <div class="card">
+                <h3>Estado de Ventanas</h3>
+
+                <div class="status-item">
+                    <span>📡 AP</span>
+                    <div id="apStatus" class="status-indicator off">INACTIVO</div>
+                </div>
+                <div class="status-item">
+                    <span>💡 LED Operación</span>
+                    <div id="ledStatusIndicator" class="status-indicator off">INACTIVO</div>
+                </div>
+                <div class="status-item">
+                    <span>💨 Ventiladores</span>
+                    <div id="fanStatus" class="status-indicator off">INACTIVO</div>
+                </div>
+                <div class="status-item">
+                    <span>💾 SD Logging</span>
+                    <div id="sdStatus" class="status-indicator off">INACTIVO</div>
+                </div>
+            </div>
+            <div class="card">
+                <h3>Configurar Ventanas de Operación</h3>
+                
+                <div class="windows-grid">
+                    <!-- VENTANA LED -->
+                    <div class="window-card">
+                        <div class="window-card-header">
+                            <span class="window-card-icon">💡</span>
+                            <span>LED Atractor</span>
+                        </div>
+                        <div class="time-inputs">
+                            <input type="time" id="ledStart" placeholder="Inicio">
+                            <span class="time-separator">→</span>
+                            <input type="time" id="ledEnd" placeholder="Fin">
+                        </div>
+                        <div class="window-status">Hora de inicio → Hora de término</div>
+                    </div>
+
+                    <!-- VENTANA AP (dos rangos: mañana y tarde/noche) -->
+                    <div class="window-card">
+                        <div class="window-card-header">
+                            <span class="window-card-icon">📡</span>
+                            <span>Punto de Acceso</span>
+                        </div>
+                        <div class="window-status" style="margin: 0 0 6px 0; text-align: left;">☀️ Mañana</div>
+                        <div class="time-inputs">
+                            <input type="time" id="apMorningStart" placeholder="Inicio">
+                            <span class="time-separator">→</span>
+                            <input type="time" id="apMorningEnd" placeholder="Fin">
+                        </div>
+                        <div class="window-status" style="margin: 14px 0 6px 0; text-align: left;">🌙 Tarde/Noche</div>
+                        <div class="time-inputs">
+                            <input type="time" id="apEveningStart" placeholder="Inicio">
+                            <span class="time-separator">→</span>
+                            <input type="time" id="apEveningEnd" placeholder="Fin">
+                        </div>
+                        <div class="window-status">Dos franjas independientes; el AP queda apagado fuera de ambas</div>
+                    </div>
+
+                    <!-- VENTANA FAN -->
+                    <div class="window-card">
+                        <div class="window-card-header">
+                            <span class="window-card-icon">💨</span>
+                            <span>Ventiladores</span>
+                        </div>
+                        <div class="time-inputs">
+                            <input type="time" id="fanStart" placeholder="Inicio">
+                            <span class="time-separator">→</span>
+                            <input type="time" id="fanEnd" placeholder="Fin">
+                        </div>
+                        <div class="window-status">Hora de inicio → Hora de término</div>
+                    </div>
+
+                    <!-- VENTANA SD -->
+                    <div class="window-card">
+                        <div class="window-card-header">
+                            <span class="window-card-icon">💾</span>
+                            <span>Almacenamiento SD</span>
+                        </div>
+                        <div class="time-inputs">
+                            <input type="time" id="sdStart" placeholder="Inicio">
+                            <span class="time-separator">→</span>
+                            <input type="time" id="sdEnd" placeholder="Fin">
+                        </div>
+                        <div class="window-status">Ventana extra para mantener el equipo despierto; los datos se registran siempre que esté encendido</div>
+                    </div>
+                </div>
+            </div>
+        
+            <div class="card">
+                <h3>Mantenimiento del sistema</h3>
+                <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+                    Actualizar el firmware (OTA, incluye este dashboard) sin abrir la carcasa y descargar
+                    todos los datos aunque el dashboard falle. Pide una clave aparte de la del WiFi.
+                </p>
+                <a href="/admin" target="_blank" rel="noopener">
+                    <button type="button" style="width: 100%;">🛠️ Abrir mantenimiento</button>
+                </a>
+            </div>
+
+            <div class="save-btn-wrapper">
+                <button onclick="restaurarPredeterminados()" style="background: var(--surface); color: var(--text-primary); border: 1px solid var(--border);">↺ Restaurar valores predeterminados</button>
+                <button onclick="saveWindows()">💾 Guardar cambios</button>
+            </div>
+        </div>
+
+        <div id="files" class="tab-content">
+            <div class="card">
+                <h3>Archivos</h3>
+                <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+                    Navega las carpetas, descarga respaldos en .zip o borra datos de prueba.
+                    Borrar pide la clave de administrador y no se puede deshacer.
+                    La <b>memoria interna</b> guarda una copia de todo dentro del ESP32, con las mismas
+                    carpetas que la SD; ahí se borra por mes o por carpeta completa.
+                </p>
+                <div class="info-group" style="margin-bottom: 12px;">
+                    <label for="origenArchivos">Origen</label>
+                    <select id="origenArchivos" onchange="cambiarOrigen(this.value)">
+                        <option value="sd">Tarjeta SD</option>
+                        <option value="flash">Memoria interna</option>
+                    </select>
+                </div>
+                <div id="almacenamientoEstado" style="font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;"></div>
+                <div style="height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-bottom: 16px;">
+                    <div id="backupUsoBarra" style="height: 100%; width: 0%; background: var(--primary);"></div>
+                </div>
+                <div id="fileBreadcrumb" style="font-size: 14px; font-weight: 600; margin-bottom: 12px; overflow-wrap: anywhere;"></div>
+                <button onclick="descargarZip(rutaArchivos)" style="width: 100%; margin-bottom: 16px;">📦 Descargar carpeta actual (.zip)</button>
+                <div id="fileMessage"></div>
+                <div id="fileList"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/chart.js"></script>
+    <script>
+        let lastKnownHour = 0;
+        let lastKnownMinute = 0;
+        let apWarningDismissed = false;
+
+        function openTab(event, tabId) {
+            // Ocultar todos los contenidos de las pestañas
+            const tabContents = document.querySelectorAll('.tab-content');
+            tabContents.forEach(tab => {
+                tab.classList.remove('active');
+            });
+            // Desactivar todos los botones de las pestañas
+            const tabButtons = document.querySelectorAll('.tab-button');
+            tabButtons.forEach(button => {
+                button.classList.remove('active');
+            });
+            // Mostrar la pestaña actual y marcar el botón de como activo
+            document.getElementById(tabId).classList.add('active');
+            event.target.classList.add('active');
+            // La pestaña Archivos se refresca cada vez que se abre
+            if (tabId === 'files') abrirCarpeta(rutaArchivos);
+        }
+
+        async function clearManualMode() {
+            await fetch("/clearManual", {
+                method: "POST"
+            });
+        }
+
+        async function toggleFan(index) {
+            const button = document.getElementById(`btn-fan-${index}`);
+            const newState = !button.classList.contains("on");
+
+            await fetch("/control", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    fan: index,
+                    state: newState
+                })
+            });
+            updateToggleButton(button, newState);
+        }
+
+        async function toggleLED() {
+            const button = document.getElementById("btn-led");
+            const newState = !button.classList.contains("on");
+
+            await fetch("/control", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    led: newState
+                })
+            });
+            updateToggleButton(button, newState);
+        }
+
+        // Modo solo carga y OLED: se aplican y guardan al instante (no esperan "Guardar cambios")
+        async function setOptions(options) {
+            await fetch("/setOptions", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(options)
+            });
+        }
+
+        async function setChargeMode(state) {
+            await setOptions({ chargeMode: state });
+            updateToggleButton(document.getElementById("btn-charge-mode"), state);
+            document.getElementById("chargeModeBanner").style.display = state ? "flex" : "none";
+        }
+
+        function toggleChargeMode() {
+            setChargeMode(!document.getElementById("btn-charge-mode").classList.contains("on"));
+        }
+
+        async function toggleOled() {
+            const button = document.getElementById("btn-oled");
+            const newState = !button.classList.contains("on");
+
+            await setOptions({ oled: newState });
+            updateToggleButton(button, newState);
+        }
+
+        // -------- Origen de los datos: tarjeta SD o memoria interna (respaldo) --------
+        // El respaldo interno se navega con las mismas rutas que la SD agregando
+        // src=flash, y devuelve las mismas carpetas y CSV, así que el explorador y las
+        // gráficas funcionan igual con los dos orígenes.
+        let origenDatos = 'sd';           // 'sd' o 'flash'
+        let origenElegidoAMano = false;   // si es false y falta la SD, se cambia solo a 'flash'
+
+        function srcParam() {
+            return origenDatos === 'flash' ? '&src=flash' : '';
+        }
+
+        function cambiarOrigen(valor, automatico = false) {
+            origenDatos = valor;
+            if (!automatico) origenElegidoAMano = true;
+            document.getElementById('origenGraficas').value = valor;
+            document.getElementById('origenArchivos').value = valor;
+            // Los selectores de Historial y la ruta de Archivos dependen del origen
+            document.getElementById('directorio').value = '';
+            document.getElementById('subdir').innerHTML = '<option value="">Seleccionar mes...</option>';
+            document.getElementById('archivo').innerHTML = '<option value="">Seleccionar archivo...</option>';
+            rutaArchivos = '';
+            if (document.getElementById('files').classList.contains('active')) abrirCarpeta('');
+        }
+
+        // Línea de estado de la pestaña Archivos (se actualiza con cada /estado)
+        function actualizarAlmacenamiento(data) {
+            if (data.sdOk === undefined) return; // firmware anterior sin estos campos
+            const sd = data.sdOk ? 'SD: montada' : 'SD: no disponible';
+            const mem = data.backupOk ? `Memoria interna: ${data.backupUsoPct} % en uso` : 'Memoria interna: ERROR (ver Mantenimiento)';
+            const estado = document.getElementById('almacenamientoEstado');
+            estado.textContent = `${sd} · ${mem}`;
+            estado.style.color = (data.sdOk && data.backupOk) ? 'var(--text-secondary)' : 'var(--danger)';
+            const barra = document.getElementById('backupUsoBarra');
+            const uso = data.backupOk ? Math.max(0, data.backupUsoPct) : 0;
+            barra.style.width = `${uso}%`;
+            barra.style.background = uso >= 85 ? 'var(--warning)' : 'var(--primary)';
+            // Sin SD, el dashboard muestra el respaldo interno (salvo que el usuario haya elegido otra cosa)
+            if (!data.sdOk && data.backupOk && !origenElegidoAMano && origenDatos !== 'flash') {
+                cambiarOrigen('flash', true);
+            }
+        }
+
+        // -------- Pestaña Archivos: explorar la SD o el respaldo, descargar .zip y borrar --------
+        let rutaArchivos = ''; // '' = raíz; si no, p. ej. 'BAT_Data/2026-10'
+
+        function formatearTamano(bytes) {
+            if (bytes < 1024) return `${bytes} B`;
+            if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+            return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+        }
+
+        function unirRuta(base, nombre) {
+            return base ? `${base}/${nombre}` : nombre;
+        }
+
+        function renderMigas() {
+            const cont = document.getElementById('fileBreadcrumb');
+            cont.innerHTML = '';
+            const crearMiga = (texto, ruta) => {
+                const a = document.createElement('a');
+                a.href = '#';
+                a.textContent = texto;
+                a.style.color = 'var(--primary)';
+                a.onclick = (e) => { e.preventDefault(); abrirCarpeta(ruta); };
+                return a;
+            };
+            cont.appendChild(crearMiga(origenDatos === 'flash' ? '💾 Memoria interna' : '📂 SD', ''));
+            const partes = rutaArchivos ? rutaArchivos.split('/') : [];
+            partes.forEach((parte, i) => {
+                cont.appendChild(document.createTextNode(' / '));
+                cont.appendChild(crearMiga(parte, partes.slice(0, i + 1).join('/')));
+            });
+        }
+
+        async function abrirCarpeta(ruta) {
+            rutaArchivos = ruta;
+            renderMigas();
+            const lista = document.getElementById('fileList');
+            lista.innerHTML = '<p style="font-size: 13px; color: var(--text-secondary);">Cargando...</p>';
+            try {
+                const response = await fetch(`/archivos?dir=${encodeURIComponent(ruta)}${srcParam()}`);
+                if (!response.ok) throw new Error(await response.text());
+                const items = await response.json();
+                // Carpetas primero, luego archivos, cada grupo por nombre
+                items.sort((a, b) => (a.type === b.type) ? a.name.localeCompare(b.name) : (a.type === 'dir' ? -1 : 1));
+                lista.innerHTML = items.length ? '' : '<p style="font-size: 13px; color: var(--text-secondary);">Carpeta vacía.</p>';
+                items.forEach(item => lista.appendChild(crearFilaArchivo(item)));
+            } catch (error) {
+                lista.innerHTML = '';
+                mostrarMensaje('Error cargando la carpeta: ' + error.message, 'error', 'fileMessage');
+            }
+        }
+
+        function crearBotonAccion(texto, titulo, onClick) {
+            const btn = document.createElement('button');
+            btn.textContent = texto;
+            btn.title = titulo;
+            btn.style.cssText = 'width: auto; padding: 8px 12px;'; // en móvil style.css pone width: 100%
+            btn.onclick = (e) => { e.stopPropagation(); onClick(); };
+            return btn;
+        }
+
+        function crearFilaArchivo(item) {
+            const ruta = unirRuta(rutaArchivos, item.name);
+            const esCarpeta = item.type === 'dir';
+            const fila = document.createElement('div');
+            fila.className = 'control-item';
+
+            const info = document.createElement('div');
+            info.style.cssText = 'flex: 1; min-width: 0; margin-right: 12px; overflow-wrap: anywhere;' + (esCarpeta ? ' cursor: pointer;' : '');
+            const nombre = document.createElement('span');
+            nombre.textContent = (esCarpeta ? '📁 ' : '📄 ') + item.name;
+            const detalle = document.createElement('div');
+            detalle.style.cssText = 'font-size: 12px; color: var(--text-secondary); margin-top: 4px;';
+            // El respaldo interno informa registros (sus CSV se generan al descargar) en vez de bytes
+            detalle.textContent = esCarpeta ? 'Carpeta'
+                : (item.records !== undefined ? `${item.records} registros` : formatearTamano(item.size || 0));
+            info.append(nombre, detalle);
+            if (esCarpeta) info.onclick = () => abrirCarpeta(ruta);
+
+            const acciones = document.createElement('div');
+            acciones.style.cssText = 'display: flex; gap: 6px; flex-shrink: 0;';
+            if (esCarpeta) {
+                acciones.appendChild(crearBotonAccion('📦', 'Descargar carpeta (.zip)', () => descargarZip(ruta)));
+            } else {
+                acciones.appendChild(crearBotonAccion('⬇️', 'Descargar archivo', () => descargarArchivoSD(ruta)));
+            }
+            // En la memoria interna un día no se puede borrar suelto (está dentro del archivo del mes)
+            if (esCarpeta || origenDatos !== 'flash') {
+                acciones.appendChild(crearBotonAccion('🗑️', 'Borrar', () => borrarRuta(ruta, esCarpeta)));
+            }
+            fila.append(info, acciones);
+            return fila;
+        }
+
+        // Descarga sin salir del dashboard; el nombre lo pone el servidor (Content-Disposition)
+        function descargarDesdeUrl(url) {
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', '');
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function descargarArchivoSD(ruta) {
+            const corte = ruta.lastIndexOf('/');
+            const dir = corte >= 0 ? ruta.substring(0, corte) : '';
+            const archivo = ruta.substring(corte + 1);
+            descargarDesdeUrl(`/descargar?dir=${encodeURIComponent(dir)}&file=${encodeURIComponent(archivo)}${srcParam()}`);
+        }
+
+        function descargarZip(ruta) {
+            descargarDesdeUrl(`/descargarZip?dir=${encodeURIComponent(ruta)}${srcParam()}`);
+            mostrarMensaje('Preparando el .zip: la descarga empieza en unos segundos (más si la carpeta es grande).', 'info', 'fileMessage');
+        }
+
+        async function borrarRuta(ruta, esCarpeta) {
+            const que = esCarpeta ? `la carpeta "${ruta}" y TODO su contenido` : `el archivo "${ruta}"`;
+            const donde = origenDatos === 'flash' ? 'de la MEMORIA INTERNA' : 'de la SD';
+            if (!confirm(`¿Borrar ${que} ${donde}?\n\nNo se puede deshacer. Si los datos te sirven, descárgalos antes.`)) return;
+            try {
+                const response = await fetch(`/borrar?path=${encodeURIComponent(ruta)}${srcParam()}`, { method: 'POST' });
+                if (response.status === 401) {
+                    mostrarMensaje('Se necesita la clave de administrador para borrar.', 'error', 'fileMessage');
+                    return;
+                }
+                const data = await response.json();
+                mostrarMensaje(data.message || data.error, response.ok ? 'success' : 'error', 'fileMessage');
+            } catch (error) {
+                mostrarMensaje('Error al borrar: ' + error.message, 'error', 'fileMessage');
+            }
+            abrirCarpeta(rutaArchivos);
+        }
+
+        function updateToggleButton(button, state) {
+            if (state) {
+                button.classList.remove("off");
+                button.classList.add("on");
+                button.textContent = "ON";
+            } else {
+                button.classList.remove("on");
+                button.classList.add("off");
+                button.textContent = "OFF";
+            }
+        }
+
+        // Umbrales de temperatura orientativos (ajusta según el disipador/carcasa real del LED y ventiladores)
+        const TEMP_ATENCION_C = 35;
+        const TEMP_ALTO_C = 42;
+
+        function updateTempRiskPill(tempC) {
+            const pill = document.getElementById('tempRiskPill');
+            if (!pill || isNaN(tempC)) return;
+            pill.classList.remove('atencion', 'alto');
+            if (tempC >= TEMP_ALTO_C) {
+                pill.textContent = "⚠ Alto";
+                pill.classList.add('alto');
+            } else if (tempC >= TEMP_ATENCION_C) {
+                pill.textContent = "⚠ Atención";
+                pill.classList.add('atencion');
+            } else {
+                pill.textContent = "Normal";
+            }
+        }
+
+        function renderAreaActivity(counts) {
+            const container = document.getElementById('areaActivityList');
+            if (!container) return;
+
+            const items = counts.map((count, i) => ({ area: i + 1, count }));
+            items.sort((a, b) => b.count - a.count);
+            const maxCount = items[0].count;
+
+            container.innerHTML = items.map((item, idx) => {
+                const isTop = idx === 0 && maxCount > 0;
+                const width = maxCount > 0 ? Math.max(6, Math.round((item.count / maxCount) * 100)) : 0;
+                const badge = isTop ? '<span class="area-activity-badge">Más activa</span>' : '';
+                return `
+                    <div class="area-activity-row">
+                        <div class="area-activity-header">
+                            <span class="area-activity-name${isTop ? ' top' : ''}">Área ${item.area}${badge}</span>
+                            <span class="area-activity-count${isTop ? ' top' : ''}">${item.count}</span>
+                        </div>
+                        <div class="area-activity-track"><div class="area-activity-fill${isTop ? ' top' : ''}" style="width:${width}%"></div></div>
+                    </div>`;
+            }).join('');
+        }
+
+        function renderIrSensorGrid(irSensors) {
+            const container = document.getElementById('irSensorGrid');
+            if (!container || !irSensors || irSensors.length !== 16) return;
+
+            let html = '';
+            for (let area = 0; area < 4; area++) {
+                html += `<div class="ir-sensor-row"><span class="ir-sensor-row-label">Área ${area + 1}</span><div class="ir-sensor-cells">`;
+                for (let pos = 0; pos < 4; pos++) {
+                    const on = irSensors[area * 4 + pos];
+                    html += `<span class="ir-sensor-cell${on ? ' on' : ''}">${on ? '1' : '0'}</span>`;
+                }
+                html += `</div></div>`;
+            }
+            container.innerHTML = html;
+        }
+
+        let chart = null;
+        let currentData = null;
+        let hourlyChartInst = null;
+        let areaChartInst = null;
+
+        function mostrarMensaje(texto, tipo, containerId = 'messageContainer') {
+            const container = document.getElementById(containerId);
+            container.innerHTML = `<div class="info-message ${tipo}">${texto}</div>`;
+            setTimeout(() => {
+                container.innerHTML = '';
+            }, 5000);
+        }
+        
+        async function actualizarDatos() {
+            try {
+                const response = await fetch('/estado');
+                const data = await response.json();
+                actualizarAlmacenamiento(data);
+
+
+                // --- ACTUALIZAR SENSORES ---
+                const tempC = parseFloat(data.temp);
+                document.getElementById('tempValue').textContent = tempC.toFixed(2);
+                document.getElementById('humValue').textContent = parseFloat(data.hum).toFixed(2);
+                document.getElementById('presValue').textContent = parseFloat(data.pres).toFixed(2);
+                document.getElementById('altValue').textContent = parseFloat(data.alt).toFixed(2);
+                updateTempRiskPill(tempC);
+
+                // Valores de INA
+                document.getElementById('voltageValue').textContent = parseFloat(data.busVoltage).toFixed(1);
+                actualizarPorcentajeBateria(parseFloat(data.busVoltage));
+                document.getElementById('currentValue').textContent = parseFloat(data.current_mA).toFixed(1);
+                document.getElementById('powerValue').textContent = parseFloat(data.power_W).toFixed(2);
+                document.getElementById('energyValue').textContent = parseFloat(data.totalEnergyWh).toFixed(2);
+
+                // Aviso de protección por bajo voltaje (bloquea luz y ventiladores, también en manual)
+                const lowBatteryBanner = document.getElementById('lowBatteryBanner');
+                if (data.lowBattery) {
+                    document.getElementById('lowBatterySubtitle').textContent =
+                        `La batería bajó de ${data.lowBatCutoff} V: luz y ventiladores bloqueados (también en manual) hasta que suba a ${data.lowBatReconnect} V.`;
+                    lowBatteryBanner.style.display = 'flex';
+                } else {
+                    lowBatteryBanner.style.display = 'none';
+                }
+
+                // Modo solo carga y pantalla OLED (tarjeta "Energía y pantalla")
+                document.getElementById('chargeModeBanner').style.display = data.chargeMode ? 'flex' : 'none';
+                updateToggleButton(document.getElementById('btn-charge-mode'), !!data.chargeMode);
+                updateToggleButton(document.getElementById('btn-oled'), !!data.oledOn);
+
+                // Actividad por área (ranking)
+                if (data.areaCounts && data.areaCounts.length === 4) {
+                    renderAreaActivity(data.areaCounts);
+                }
+
+                // Matriz de sensores IR en vivo
+                renderIrSensorGrid(data.irSensors);
+
+                // Cupo del interlock de ventiladores
+                if (data.fans && typeof data.maxFans !== 'undefined') {
+                    const activeFans = data.fans.filter(Boolean).length;
+                    document.getElementById('maxFansNote').textContent = `Máx. simultáneos: ${activeFans}/${data.maxFans}`;
+                }
+
+                // Separar fecha y hora si es posible
+                let fecha = '--', hora = '--';
+                if (data.timestamp) {
+                    let partes = data.timestamp.split(/[T ]/);
+                    if (partes.length >= 2) {
+                        fecha = partes[0];
+                        hora = partes[1];
+
+                        // Extraer numeros para la validación de saveWindows
+                        const timeParts = hora.split(':');
+                        if (timeParts.length >= 2) {
+                            lastKnownHour = parseInt(timeParts[0]);
+                            lastKnownMinute = parseInt(timeParts[1]);
+                        }
+                    } else {
+                        fecha = data.timestamp;
+                    }
+                }
+                document.getElementById('dateValue').textContent = fecha;
+                document.getElementById('timeValue').textContent = hora;
+                const rtcCurrentTimeEl = document.getElementById('rtcCurrentTime');
+                if (rtcCurrentTimeEl) {
+                    const seg = (typeof data.second !== 'undefined') ? String(data.second).padStart(2, '0') : '--';
+                    rtcCurrentTimeEl.textContent = `${fecha} ${hora}:${seg}`;
+                }
+                updateApCloseWarning(data);
+
+                // Actualizar estado de LED
+                const ledElement = document.getElementById('led-state');
+                if (data.led) {
+                    ledElement.textContent = "ON";
+                    ledElement.classList.remove("badge-off");
+                    ledElement.classList.add("badge-on");
+                } else {
+                    ledElement.textContent = "OFF";
+                    ledElement.classList.remove("badge-on");
+                    ledElement.classList.add("badge-off");
+                }
+                const ledModeElement = document.getElementById('ledMode');
+                if (ledModeElement) {
+                    const ledIsManual = !!data.manualLed;
+                    ledModeElement.textContent = ledIsManual ? "Manual" : "Automático";
+                    ledModeElement.classList.toggle("manual", ledIsManual);
+                    ledModeElement.classList.toggle("auto", !ledIsManual);
+                }
+                // Actualizar estado de ventiladores (ON / En cola / OFF)
+                if (data.fans && data.fans.length === 4) {
+                    data.fans.forEach((state, index) => {
+                        const fanElement = document.getElementById(`fan-${index}`);
+                        const queued = data.fansQueued && data.fansQueued[index];
+                        fanElement.classList.remove("badge-on", "badge-off", "badge-queued");
+                        if (state) {
+                            fanElement.textContent = "ON";
+                            fanElement.classList.add("badge-on");
+                        } else if (queued) {
+                            fanElement.textContent = "En cola";
+                            fanElement.classList.add("badge-queued");
+                        } else {
+                            fanElement.textContent = "OFF";
+                            fanElement.classList.add("badge-off");
+                        }
+
+                        // Tag de modo (automático / manual)
+                        const modeElement = document.getElementById(`fanMode-${index}`);
+                        if (modeElement) {
+                            const isManual = data.manualFans && data.manualFans[index];
+                            modeElement.textContent = isManual ? "Manual" : "Automático";
+                            modeElement.classList.toggle("manual", isManual);
+                            modeElement.classList.toggle("auto", !isManual);
+                        }
+                    });
+                }
+                // -------- Indicador de Modo Manual --------
+                let manualActive = false;
+                const manualParts = [];
+                // LED manual
+                if (data.manualLed) {
+                    manualActive = true;
+                    manualParts.push("LED");
+                }
+                // Fans manual
+                if (data.manualFans) {
+                    data.manualFans.forEach((state, index) => {
+                        if (state) {
+                            manualActive = true;
+                            manualParts.push(`Ventilador ${index + 1}`);
+                        }
+                    });
+                }
+                const indicator = document.getElementById("manualIndicator");
+                if (manualActive) {
+                    indicator.textContent = "MODO MANUAL ACTIVO";
+                    indicator.classList.add("active");
+                } else {
+                    indicator.textContent = "MODO AUTOMÁTICO";
+                    indicator.classList.remove("active");
+                }
+
+                // Aviso de modo manual visible en la pestaña Dashboard (no solo en Configuración)
+                const manualBanner = document.getElementById("manualBanner");
+                if (manualActive) {
+                    document.getElementById("manualBannerSubtitle").textContent =
+                        manualParts.join(", ") + " — control manual activo, no responde a horarios ni sensores.";
+                    manualBanner.style.display = "flex";
+                } else {
+                    manualBanner.style.display = "none";
+                }
+
+                // Sincronizar botones manuales con estado real
+                updateToggleButton(document.getElementById("btn-led"), data.led);
+
+                if (data.fans) {
+                    data.fans.forEach((state, index) => {
+                        updateToggleButton(
+                            document.getElementById(`btn-fan-${index}`),
+                            state
+                        );
+                    });
+                }
+                
+                // -------- VENTANA DE OPERACIONES (Sincronización) --------
+                //Solo actualizar los inputs si el usuario NO está viendo la pestaña de configuración
+                const settingsTab = document.getElementById("config"); // Ajusta al ID de tu div de config
+                if (settingsTab && !settingsTab.classList.contains("active")) {
+                    cargarConfiguracionEnFormulario(data);
+                }
+                // Actualizar indicadores de "ACTIVO/INACTIVO" (siempre, son solo lectura)
+                updateStatus("apStatus", data.apActive);
+                updateStatus("ledStatusIndicator", data.ledActive);
+                updateStatus("fanStatus", data.fanActive);
+                updateStatus("sdStatus", data.sdActive);
+
+            } catch (error) {
+                console.error('Error al actualizar datos:', error);
+            }
+        }
+        function formatTime(h, m) {
+            return String(h).padStart(2, '0') + ":" +
+                String(m).padStart(2, '0');
+        }
+
+        // Voltaje en reposo vs. % de carga para batería Li-ion 3S (4.20 V/celda = 100 %,
+        // 3.30 V/celda = 0 %). Es la misma tabla usada en el análisis de autonomía.
+        const TABLA_BATERIA_3S = [
+            [9.90, 0], [10.35, 5], [11.04, 10], [11.22, 20], [11.31, 30], [11.37, 40],
+            [11.46, 50], [11.61, 60], [11.76, 70], [11.94, 80], [12.18, 90], [12.60, 100]
+        ];
+
+        function estimarPorcentajeBateria(voltaje) {
+            if (voltaje <= TABLA_BATERIA_3S[0][0]) return 0;
+            for (let i = 1; i < TABLA_BATERIA_3S.length; i++) {
+                const [vHi, pHi] = TABLA_BATERIA_3S[i];
+                if (voltaje <= vHi) {
+                    const [vLo, pLo] = TABLA_BATERIA_3S[i - 1];
+                    return pLo + (pHi - pLo) * (voltaje - vLo) / (vHi - vLo); // interpolación lineal
+                }
+            }
+            return 100;
+        }
+
+        function actualizarPorcentajeBateria(voltaje) {
+            const valor = document.getElementById('batteryPctValue');
+            const card = document.getElementById('batteryPctCard');
+            if (!(voltaje > 0)) { // INA sin lectura todavía
+                valor.textContent = '--';
+                return;
+            }
+            const pct = Math.round(estimarPorcentajeBateria(voltaje));
+            valor.textContent = pct;
+            // Verde > 50 %, ámbar 20-50 %, rojo < 20 % (cerca del corte de 11.0 V ≈ 10 %)
+            const color = pct > 50 ? '#2ecc71' : (pct >= 20 ? '#F59E0B' : '#EF4444');
+            card.style.borderTop = `3px solid ${color}`;
+        }
+
+        // Llena el formulario de Configuración con los valores de /estado
+        function cargarConfiguracionEnFormulario(data) {
+            const fDur = data.fanDur;
+            const fThres = data.threshold;
+            const fMaxFans = data.maxFans;
+
+            document.getElementById("fanDurInput").value = fDur;
+            document.getElementById("valFan").textContent = fDur; // Actualiza el texto
+            document.getElementById("thresholdInput").value = fThres;
+            document.getElementById("valThres").textContent = fThres; // Actualiza el texto
+            document.getElementById("maxFansInput").value = fMaxFans;
+            document.getElementById("valMaxFans").textContent = fMaxFans; // Actualiza el texto
+
+            document.getElementById("ledStart").value = formatTime(data.ledSH, data.ledSM);
+            document.getElementById("ledEnd").value = formatTime(data.ledEH, data.ledEM);
+            document.getElementById("sdStart").value = formatTime(data.sdSH, data.sdSM);
+            document.getElementById("sdEnd").value = formatTime(data.sdEH, data.sdEM);
+            document.getElementById("apMorningStart").value = formatTime(data.apMoSH, data.apMoSM);
+            document.getElementById("apMorningEnd").value   = formatTime(data.apMoEH, data.apMoEM);
+            document.getElementById("apEveningStart").value = formatTime(data.apEvSH, data.apEvSM);
+            document.getElementById("apEveningEnd").value   = formatTime(data.apEvEH, data.apEvEM);
+            document.getElementById("fanStart").value = formatTime(data.fanSH, data.fanSM);
+            document.getElementById("fanEnd").value   = formatTime(data.fanEH, data.fanEM);
+        }
+
+        async function cargarArchivos() {
+            const directorio = document.getElementById('directorio').value;
+            if (!directorio) return;
+
+            try {
+                const response = await fetch(`/archivos?dir=${directorio}${srcParam()}`);
+                const items = await response.json();
+
+                const subdirSelect = document.getElementById('subdir');
+                subdirSelect.innerHTML = '<option value="">Seleccionar mes...</option>';
+
+                items.forEach(item => {
+                if (item.type === "dir") {
+                    const option = document.createElement('option');
+                    option.value = item.name;
+                    option.textContent = item.name;
+                    subdirSelect.appendChild(option);
+                }
+                });
+
+            } catch (error) {
+                mostrarMensaje("Error cargando meses", "error");
+                console.error('Error cargando meses:', error);
+            }
+        }
+
+        async function cargarArchivosMes() {
+            const directorio = document.getElementById('directorio').value;
+            const subdir = document.getElementById('subdir').value;
+
+            if (!directorio || !subdir) return;
+
+            try {
+                const response = await fetch(`/archivos?dir=${directorio}/${subdir}${srcParam()}`);
+                const items = await response.json();
+
+                const archivoSelect = document.getElementById('archivo');
+                archivoSelect.innerHTML = '<option value="">Seleccionar archivo...</option>';
+
+                items.forEach(item => {
+                    if (item.type === "file") {
+                        const option = document.createElement('option');
+                        option.value = item.name;
+                        option.textContent = item.name;
+                        archivoSelect.appendChild(option);
+                    }
+                });
+            } catch (error) {
+                mostrarMensaje("Error cargando archivos", "error");
+            }
+        }
+            
+        async function cargarDatos() {
+            const directorio = document.getElementById('directorio').value;
+            const subdir = document.getElementById('subdir').value;
+            const archivo = document.getElementById('archivo').value;
+
+            if (!directorio || !subdir || !archivo) {
+                mostrarMensaje("Selecciona directorio, mes y archivo", "error");
+                return;
+            }
+
+            try {
+                const url = `/descargar?dir=${directorio}/${subdir}&file=${archivo}${srcParam()}`;
+                const response = await fetch(url);
+                const text = await response.text();
+                const lines = text.split('\n');
+
+                // Mostrar contenedores principales
+                document.getElementById('chartsContainer').style.display = 'block';
+                document.getElementById('downloadGroup').style.display = 'flex';
+
+                if (directorio === "Fans_Data") {
+                    // Ocultar opciones de BME y mostrar las de Fans
+                    document.getElementById('chartControls').style.display = 'none';
+                    document.getElementById('eventControls').style.display = 'block';
+                    
+                    // Ocultar gráfica de BME y mostrar Fans
+                    document.getElementById('chartContainer').style.display = 'none';
+                    document.getElementById('hourlyChartContainer').style.display = 'block';
+                    document.getElementById('areaChartContainer').style.display = 'none';
+                    
+                    procesarEventos(lines);
+                } else {
+                    // Ocultar opciones de Fans y mostrar las de BME
+                    document.getElementById('chartControls').style.display = 'block';
+                    document.getElementById('eventControls').style.display = 'none';
+                    
+                    // Ocultar gráficas de Fans y mostrar BME
+                    document.getElementById('chartContainer').style.display = 'block';
+                    document.getElementById('hourlyChartContainer').style.display = 'none';
+                    document.getElementById('areaChartContainer').style.display = 'none';
+                    
+                    parseAndChart(text);
+                    mostrarMensaje("Datos cargados correctamente");
+                }
+            } catch (error) {
+                console.error("Error cargando datos:", error);
+                mostrarMensaje("Error cargando archivo", "error");
+            }
+        }
+
+        function procesarEventos(lines) {
+            const hourlyCounts = Array(24).fill(0);
+            const areaCounts = { "Area_1": 0, "Area_2": 0, "Area_3": 0, "Area_4": 0 };
+
+            // i=1 para saltar el encabezado: Fecha,Hora,Evento,Area,Conteo
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+
+                const values = line.split(',');
+                if (values.length < 4) continue;
+
+                // 1. Procesar Hora (Columna 1: HH:MM:SS)
+                const horaStr = values[1].split(':')[0];
+                const hora = parseInt(horaStr);
+                if (!isNaN(hora)) hourlyCounts[hora]++;
+
+                // 2. Procesar Área (Columna 3: Area_X)
+                const area = values[3].trim();
+                if (areaCounts.hasOwnProperty(area)) {
+                    areaCounts[area]++;
+                }
+            }
+            renderHourlyChart(hourlyCounts);
+            renderAreaChart(Object.values(areaCounts));
+        }
+
+        function renderHourlyChart(data) {
+            const ctx = document.getElementById('hourlyChart').getContext('2d');
+            if (hourlyChartInst) hourlyChartInst.destroy(); // Limpiar gráfico anterior
+
+            // Barras más opacas en las horas con más detecciones (mismo criterio que "Actividad por Área")
+            const maxCount = Math.max(...data, 0);
+            const barColors = data.map(count => {
+                const alpha = maxCount > 0 ? 0.15 + 0.65 * (count / maxCount) : 0.15;
+                return `rgba(91, 111, 232, ${alpha.toFixed(2)})`;
+            });
+
+            hourlyChartInst = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: Array.from({length: 24}, (_, i) => `${i}:00`),
+                    datasets: [{
+                        label: 'Detecciones por Hora',
+                        data: data,
+                        backgroundColor: barColors,
+                        borderColor: '#5B6FE8',
+                        borderWidth: 1
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+        }
+
+        // Resalta el área con más detecciones (mismo criterio que renderAreaActivity())
+        function getAreaChartColors(data) {
+            const palette = ['#5B6FE8', '#93A0F0', '#B7C0F5', '#DDE1FA']; // de más a menos saturado
+            const order = data
+                .map((count, i) => ({ i, count }))
+                .sort((a, b) => b.count - a.count)
+                .map(item => item.i);
+            const colors = new Array(data.length);
+            order.forEach((originalIndex, rank) => {
+                colors[originalIndex] = palette[Math.min(rank, palette.length - 1)];
+            });
+            return colors;
+        }
+
+        function renderAreaChart(data) {
+            const ctx = document.getElementById('areaChart').getContext('2d');
+            if (areaChartInst) areaChartInst.destroy();
+            areaChartInst = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Área 1', 'Área 2', 'Área 3', 'Área 4'],
+                    datasets: [{
+                        data: data,
+                        backgroundColor: getAreaChartColors(data)
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+        }
+
+        function selectEventChart(chartType) {
+            const hourlyContainer = document.getElementById('hourlyChartContainer');
+            const areaContainer = document.getElementById('areaChartContainer');
+            const buttons = document.querySelectorAll('.chart-type-btn');
+
+            buttons.forEach(btn => btn.classList.remove('active'));
+
+            if (chartType === 'hourly') {
+                hourlyContainer.style.display = 'block';
+                areaContainer.style.display = 'none';
+                document.querySelector('[data-chart="hourly"]').classList.add('active');
+            } else if (chartType === 'area') {
+                hourlyContainer.style.display = 'none';
+                areaContainer.style.display = 'block';
+                document.querySelector('[data-chart="area"]').classList.add('active');
+            }
+        }
+
+        function descargarGraficaEventos() {
+            const hourlyContainer = document.getElementById('hourlyChartContainer');
+            const areaContainer = document.getElementById('areaChartContainer');
+            let canvas, filename;
+
+            if (hourlyContainer.style.display !== 'none') {
+                canvas = document.getElementById('hourlyChart');
+                filename = 'mapa_calor_' + document.getElementById('archivo').value.replace('.csv', '.png');
+            } else if (areaContainer.style.display !== 'none') {
+                canvas = document.getElementById('areaChart');
+                filename = 'distribucion_areas_' + document.getElementById('archivo').value.replace('.csv', '.png');
+            } else {
+                mostrarMensaje('No hay gráfica visible', 'error');
+                return;
+            }
+
+            const link = document.createElement('a');
+            link.href = canvas.toDataURL('image/png');
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            mostrarMensaje('Gráfica descargada correctamente', 'success');
+        }
+
+        function parseAndChart(csv) {
+            
+            // 1. Limpiamos el texto y lo dividimos en una lista de filas
+            const filas = csv.trim().split('\n');
+            
+            // Si el archivo está vacío o solo tiene el encabezado, no hacemos nada
+            if (filas.length < 2) return;
+            // 2. Miramos la primera fila (el encabezado) para saber qué sensor es
+            const encabezado = filas[0].toLowerCase();
+            const esINA = encabezado.includes("e_wh"); // Si dice "E_Wh", es el sensor INA
+            const esBAT = encabezado.includes("v_bat"); // Si dice "V_bat", es el registro de batería
+
+            // 3. Creamos un "contenedor" vacío para guardar los datos que vamos a extraer
+            const datosExtraidos = {
+                labels: [],    // Aquí irán las horas (eje X)
+                tipo: esBAT ? 'BAT' : (esINA ? 'INA' : 'BME'), // Guardamos qué tipo es para la gráfica
+                temp: [], hum: [],           // Para el BME
+                pow: [], enWh: [], // Para el INA
+                vbat: []           // Para la batería
+            };
+
+            // 4. Empezamos a recorrer las filas una por una (empezamos en 1 para saltar el encabezado)
+            for (let i = 1; i < filas.length; i++) {
+                const columnas = filas[i].split(','); // Cortamos la fila por las comas
+
+                // Saltamos filas que estén mal o incompletas (mínimo deben tener 5 columnas)
+                if (columnas.length < 5) continue;
+
+                // La Hora siempre está en la segunda posición [índice 1]
+                datosExtraidos.labels.push(columnas[1].trim());
+
+                // 5. Dependiendo del sensor, guardamos los números en su lugar
+                if (esBAT) {
+                    // Datos de batería: [3]=V_bat
+                    datosExtraidos.vbat.push(parseFloat(columnas[3]));
+                } else if (esINA) {
+                    // Datos del INA: [5]=P_W, [6]=E_Wh
+                    datosExtraidos.pow.push(parseFloat(columnas[5]));
+                    datosExtraidos.enWh.push(parseFloat(columnas[6]));
+                } else {
+                    // Datos del BME: [2]=Temperatura, [3]=Humedad
+                    datosExtraidos.temp.push(parseFloat(columnas[2]));
+                    datosExtraidos.hum.push(parseFloat(columnas[3]));
+                }
+            }
+
+            // 6. Finalmente, guardamos todo en la variable global y mandamos a graficar
+            currentData = datosExtraidos;
+            // Lógica para mostrar/ocultar los botones según el sensor
+            document.getElementById('groupINA').style.display = datosExtraidos.tipo === 'INA' ? 'flex' : 'none';
+            document.getElementById('groupBME').style.display = datosExtraidos.tipo === 'BME' ? 'flex' : 'none';
+            document.getElementById('groupBAT').style.display = datosExtraidos.tipo === 'BAT' ? 'flex' : 'none';
+            graficar(datosExtraidos);
+        }
+        
+        function graficar(data) {
+
+            const datasets = [];
+
+            const ctx = document.getElementById('myChart').getContext('2d');
+
+            if (data.tipo === 'BME') {
+                if (document.getElementById('showTemp').checked && data.temp) {
+                    datasets.push({
+                        label: 'Temperatura (°C)',
+                        data: data.temp,
+                        borderColor: '#EF4444',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        borderWidth: 2,
+                        pointStyle: 'circle',
+                        pointRadius: 3,
+                        pointBorderWidth: 2,
+                        pointBackgroundColor: '#fff',
+                        tension: 0.3
+                    });
+                }
+
+                if (document.getElementById('showHum').checked && data.hum) {
+                    datasets.push({
+                        label: 'Humedad (%)',
+                        data: data.hum,
+                        borderColor: '#5B6FE8',
+                        backgroundColor: 'rgba(91, 111, 232, 0.1)',
+                        borderWidth: 2,
+                        pointStyle: 'rect',
+                        pointRadius: 3,
+                        pointBorderWidth: 2,
+                        pointBackgroundColor: '#fff',
+                        tension: 0.3
+                    });
+                }
+            }
+            // Configuración para datos de INA
+            else if (data.tipo == 'INA') {
+                if (document.getElementById('showPot').checked  && data.pow) {
+                    datasets.push({
+                        label: 'Potencia (W)',
+                        data: data.pow,
+                        borderColor: '#F59E0B',
+                        backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                        borderWidth: 2,
+                        pointStyle: 'circle',
+                        pointRadius: 3,
+                        pointBorderWidth: 2,
+                        pointBackgroundColor: '#fff',
+                        tension: 0.3,
+                        fill: false
+                    });
+                }
+                if (document.getElementById('showEner').checked && data.enWh) {
+                    datasets.push({
+                        label: 'Energia (Wh)',
+                        data: data.enWh,
+                        borderColor: '#10B981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.3)',
+                        borderWidth: 2,
+                        pointStyle: 'rect',
+                        pointRadius: 3,
+                        pointBorderWidth: 2,
+                        pointBackgroundColor: '#fff',
+                        tension: 0.3,
+                        fill: 'origin'
+                    });
+                }
+            }
+            // Configuración para datos de batería
+            else if (data.tipo == 'BAT') {
+                if (document.getElementById('showVbat').checked && data.vbat) {
+                    datasets.push({
+                        label: 'Voltaje batería (V)',
+                        data: data.vbat,
+                        borderColor: '#5B6FE8',
+                        backgroundColor: 'rgba(91, 111, 232, 0.1)',
+                        borderWidth: 2,
+                        pointStyle: 'circle',
+                        pointRadius: 3,
+                        pointBorderWidth: 2,
+                        pointBackgroundColor: '#fff',
+                        tension: 0.3,
+                        fill: false
+                    });
+                }
+            }
+
+            if (chart) chart.destroy(); // Si ya hay un gráfico, lo destruimos para limpiar el lienzo
+
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: {padding: 15, font: {size: 12}}
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            title: {display: true, text: 'Valor'}
+                        }
+                    }
+                }
+            });
+        }
+
+        function actualizarGrafica() {
+            if (currentData) {graficar(currentData);}
+        }
+        
+        function descargarArchivo() {
+            const directorio = document.getElementById('directorio').value;
+            const subdir = document.getElementById('subdir').value;
+            const archivo = document.getElementById('archivo').value;
+
+            if (!directorio || !subdir || !archivo) {
+                mostrarMensaje("Selecciona directorio, mes y archivo", "error");
+                return;
+            }
+
+            const url = `/descargar?dir=${directorio}/${subdir}&file=${archivo}${srcParam()}`;
+
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = archivo;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            mostrarMensaje("Descarga iniciada");
+        }
+        
+        function descargarGraficaActual() {
+            const archivo = document.getElementById('archivo').value;
+            
+            // Verificar qué gráfica está visible
+            const chartContainer = document.getElementById('chartContainer');
+            const hourlyContainer = document.getElementById('hourlyChartContainer');
+            const areaContainer = document.getElementById('areaChartContainer');
+            
+            let canvas, filename;
+
+            if (chartContainer && chartContainer.style.display !== 'none') {
+                // Descargar gráfica BME
+                if (!chart) {
+                    mostrarMensaje('Primero carga un archivo', 'error');
+                    return;
+                }
+                canvas = document.getElementById('myChart');
+                filename = `grafica_${archivo.replace('.csv', '.png')}`;
+            } else if (hourlyContainer && hourlyContainer.style.display !== 'none') {
+                // Descargar Mapa de Calor
+                canvas = document.getElementById('hourlyChart');
+                filename = `mapa_calor_${archivo.replace('.csv', '.png')}`;
+            } else if (areaContainer && areaContainer.style.display !== 'none') {
+                // Descargar Distribución por Área
+                canvas = document.getElementById('areaChart');
+                filename = `distribucion_areas_${archivo.replace('.csv', '.png')}`;
+            } else {
+                mostrarMensaje('No hay gráfica visible', 'error');
+                return;
+            }
+
+            const link = document.createElement('a');
+            link.href = canvas.toDataURL('image/png');
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            mostrarMensaje('Gráfica descargada correctamente', 'success');
+        }
+        
+        function formatTime(h, m) {
+            return String(h).padStart(2,'0') + ":" + String(m).padStart(2,'0');
+        }
+        async function saveWindows() {
+
+            const splitTime = (id) => {
+                const val = document.getElementById(id).value;
+                const [h, m] = val.split(':').map(Number);
+                return { h, m };
+            };
+            
+            const fanDur = document.getElementById("fanDurInput").value;
+            const threshold = document.getElementById("thresholdInput").value;
+            const maxFans = document.getElementById("maxFansInput").value;
+
+            // NUEVA VALIDACIÓN EN CLIENTE
+            if (fanDur > 10 || fanDur < 1) {
+                alert("⚠️ El tiempo del ventilador debe estar entre 1 y 10 minutos.");
+                return;
+            }
+            if (threshold > 30 || threshold < 1) {
+                alert("⚠️ El umbral de insectos debe estar entre 1 y 30.");
+                return;
+            }
+            if (maxFans > 4 || maxFans < 1) {
+                alert("⚠️ El máximo de ventiladores simultáneos debe estar entre 1 y 4.");
+                return;
+            }
+
+            const ledS = splitTime("ledStart");
+            const ledE = splitTime("ledEnd");
+            const apMoS = splitTime("apMorningStart");
+            const apMoE = splitTime("apMorningEnd");
+            const apEvS = splitTime("apEveningStart");
+            const apEvE = splitTime("apEveningEnd");
+            const fanS = splitTime("fanStart");
+            const fanE = splitTime("fanEnd");
+            const sdS = splitTime("sdStart");
+            const sdE = splitTime("sdEnd");
+
+            // Lógica de protección: ¿La hora actual está dentro de alguno de los dos rangos de AP?
+            const nowVal = lastKnownHour * 60 + lastKnownMinute;
+            const isInsideRange = (s, e) => {
+                const startVal = s.h * 60 + s.m;
+                const endVal = e.h * 60 + e.m;
+                return startVal <= endVal
+                    ? (nowVal >= startVal && nowVal <= endVal)
+                    : (nowVal >= startVal || nowVal <= endVal); // cruza medianoche
+            };
+            const isInside = isInsideRange(apMoS, apMoE) || isInsideRange(apEvS, apEvE);
+
+            if (!isInside) {
+                const confirmForce = confirm("¡CUIDADO! La hora actual está fuera de ambos rangos de AP que intentas guardar. Si guardas, perderás la conexión WiFi inmediatamente. ¿Deseas continuar?");
+                if (!confirmForce) return;
+            }
+
+            try {
+                const response = await fetch("/saveWindows", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        ledSH: ledS.h, ledSM: ledS.m, ledEH: ledE.h, ledEM: ledE.m,
+                        apMoSH: apMoS.h, apMoSM: apMoS.m, apMoEH: apMoE.h, apMoEM: apMoE.m,
+                        apEvSH: apEvS.h, apEvSM: apEvS.m, apEvEH: apEvE.h, apEvEM: apEvE.m,
+                        fanSH: fanS.h, fanSM: fanS.m, fanEH: fanE.h, fanEM: fanE.m,
+                        sdSH: sdS.h, sdSM: sdS.m, sdEH: sdE.h, sdEM: sdE.m,
+                        fanDur: parseInt(fanDur),
+                        threshold: parseInt(threshold),
+                        maxFans: parseInt(maxFans)
+                    })
+                });
+            
+                const result = await response.json();
+                if (response.ok) {
+                    alert("✅ Configuración guardada en la memoria flash.");
+                } else {
+                    // Esto mostrará el error de "La hora actual quedaría fuera..." enviado desde C++
+                    alert("❌ Error: " + result.error);
+                }
+            } catch (error) {
+                alert("❌ Error de comunicación con el servidor.");
+            }
+        }
+
+        // Restaura y guarda en NVS los valores predeterminados del firmware
+        // (horarios + parámetros de captura) y los carga en el formulario.
+        async function restaurarPredeterminados() {
+            const confirmar = confirm(
+                "Se restaurarán y guardarán los valores predeterminados:\n" +
+                "• Luz y ventiladores: 18:00 → 03:00\n" +
+                "• AP: 08:00 → 12:30 y 18:00 → 20:00\n" +
+                "• Ventilador 1 min, umbral 10, máx. 3 simultáneos\n\n" +
+                "Si la hora actual queda fuera de las ventanas del AP, perderás la conexión WiFi. ¿Continuar?"
+            );
+            if (!confirmar) return;
+
+            try {
+                const response = await fetch("/resetDefaults", { method: "POST" });
+                if (!response.ok) {
+                    alert("❌ Error al restaurar los valores predeterminados.");
+                    return;
+                }
+                const estado = await fetch('/estado');
+                cargarConfiguracionEnFormulario(await estado.json());
+                alert("✅ Valores predeterminados restaurados y guardados en la memoria flash.");
+            } catch (error) {
+                alert("❌ Error de comunicación con el servidor.");
+            }
+        }
+
+        // -------- Ajuste de fecha/hora del RTC --------
+        async function sendRtcTime(d) {
+            try {
+                const response = await fetch("/setRTC", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        year: d.getFullYear(),
+                        month: d.getMonth() + 1,
+                        day: d.getDate(),
+                        hour: d.getHours(),
+                        minute: d.getMinutes(),
+                        second: d.getSeconds()
+                    })
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    alert("✅ Hora del RTC actualizada.");
+                } else {
+                    alert("❌ Error: " + result.error);
+                }
+            } catch (error) {
+                alert("❌ Error de comunicación con el servidor.");
+            }
+        }
+
+        function syncRtcWithDevice() {
+            sendRtcTime(new Date());
+        }
+
+        function saveRtcManual() {
+            const val = document.getElementById("rtcDateTimeInput").value;
+            if (!val) {
+                alert("⚠️ Selecciona una fecha y hora primero.");
+                return;
+            }
+            sendRtcTime(new Date(val));
+        }
+
+        // -------- Aviso de cierre de conexión (AP) --------
+        // El AP ahora tiene dos rangos independientes (mañana / tarde-noche); se calcula
+        // cuánto falta para que termine el que esté activo en este momento (el más próximo,
+        // si por alguna configuración ambos llegaran a estar activos a la vez).
+        function secondsUntilWindowEnd(startH, startM, endH, endM, nowTotalSec) {
+            const startSec = startH * 3600 + startM * 60;
+            const endSec = endH * 3600 + endM * 60;
+            const isInside = startSec <= endSec
+                ? (nowTotalSec >= startSec && nowTotalSec < endSec)
+                : (nowTotalSec >= startSec || nowTotalSec < endSec); // cruza medianoche
+            if (!isInside) return null;
+            let remaining = endSec - nowTotalSec;
+            if (remaining < 0) remaining += 86400;
+            return remaining;
+        }
+
+        function updateApCloseWarning(data) {
+            const banner = document.getElementById('apCloseWarning');
+            const countdownEl = document.getElementById('apCloseCountdown');
+            const prefixEl = document.getElementById('apCloseWarningPrefix');
+            if (!banner || !countdownEl || !prefixEl || typeof data.second === 'undefined') return;
+
+            let secondsRemaining;
+            let extended = false;
+
+            if (data.forceAwake && typeof data.forceAwakeRemainingSec !== 'undefined') {
+                secondsRemaining = data.forceAwakeRemainingSec;
+                extended = true;
+            } else if (data.apActive && typeof data.apMoEH !== 'undefined' && typeof data.apEvEH !== 'undefined') {
+                const nowTotalSec = lastKnownHour * 3600 + lastKnownMinute * 60 + data.second;
+                const candidates = [
+                    secondsUntilWindowEnd(data.apMoSH, data.apMoSM, data.apMoEH, data.apMoEM, nowTotalSec),
+                    secondsUntilWindowEnd(data.apEvSH, data.apEvSM, data.apEvEH, data.apEvEM, nowTotalSec),
+                ].filter(v => v !== null);
+                if (candidates.length === 0) {
+                    banner.style.display = 'none';
+                    return;
+                }
+                secondsRemaining = Math.min(...candidates);
+            } else {
+                banner.style.display = 'none';
+                return;
+            }
+
+            if (secondsRemaining > 300) {
+                banner.style.display = 'none';
+                apWarningDismissed = false; // listo para volver a mostrarse la próxima vez que se acerque
+                return;
+            }
+
+            if (apWarningDismissed) return;
+
+            const mm = Math.floor(secondsRemaining / 60);
+            const ss = secondsRemaining % 60;
+            countdownEl.textContent = `${mm}:${String(ss).padStart(2, '0')}`;
+            prefixEl.textContent = extended ? '⏳ Conexión extendida — se cerrará en' : '⚠️ La conexión se cerrará en';
+            banner.classList.toggle('urgent', secondsRemaining <= 60);
+            banner.style.display = 'flex';
+        }
+
+        async function postponeConnection() {
+            try {
+                const response = await fetch('/extendConnection', { method: 'POST' });
+                const result = await response.json();
+                if (response.ok) {
+                    apWarningDismissed = false;
+                    alert('✅ Conexión extendida 5 minutos más.');
+                } else {
+                    alert('❌ Error: ' + (result.error || 'No se pudo extender la conexión.'));
+                }
+            } catch (error) {
+                alert('❌ Error de comunicación con el servidor.');
+            }
+        }
+
+        function dismissApWarning() {
+            apWarningDismissed = true;
+            document.getElementById('apCloseWarning').style.display = 'none';
+        }
+
+        function updateStatus(elementId, isActive) {
+            const el = document.getElementById(elementId);
+
+            if (isActive) {
+                el.classList.remove("off");
+                el.classList.add("on");
+                el.textContent = "ACTIVO";
+            } else {
+                el.classList.remove("on");
+                el.classList.add("off");
+                el.textContent = "INACTIVO";
+            }
+        }
+        
+        // Event listeners para botones de selección de gráfica
+        document.querySelectorAll('.chart-type-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                selectEventChart(btn.getAttribute('data-chart'));
+            });
+        });
+
+        // Actualizar datos en tiempo real cada 1 segundo
+        setInterval(actualizarDatos, 1000);
+        actualizarDatos();
+    </script>
+</body>
+</html>

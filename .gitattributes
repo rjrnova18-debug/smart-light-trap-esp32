@@ -1,0 +1,8 @@
+# Texto con fin de línea LF dentro del repositorio (en Windows git lo convierte al hacer
+# checkout según core.autocrlf); así los diffs no se llenan de cambios de CRLF/LF.
+* text=auto
+
+# Binarios: nunca convertir
+*.bin binary
+*.png binary
+*.jpg binary
