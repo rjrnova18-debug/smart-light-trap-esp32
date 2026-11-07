@@ -98,7 +98,7 @@ const int SAMPLE_PERIOD_MIN = 30;
 // Por debajo de LOW_BAT_CUTOFF_V (sostenido LOW_BAT_CONFIRM_MS) se bloquean luz y
 // ventiladores, también en manual. Se liberan al volver a LOW_BAT_RECONNECT_V:
 // la histéresis evita que se prendan y apaguen al recuperarse el voltaje sin carga.
-const float LOW_BAT_CUTOFF_V = 11.0;    // ≈ 10-15 % en reposo; se mide con carga, así que deja algo de margen
+const float LOW_BAT_CUTOFF_V = 10.8;    // ≈ 3.6 V/celda (~8 % en reposo); se mide con carga, así que deja algo de margen
 const float LOW_BAT_RECONNECT_V = 11.4; // al quitar luz+ventiladores el voltaje rebota ~0.2 V, no alcanza para reconectar
 const unsigned long LOW_BAT_CONFIRM_MS = 30000;
 

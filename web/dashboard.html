@@ -1128,7 +1128,7 @@
             }
             const pct = Math.round(estimarPorcentajeBateria(voltaje));
             valor.textContent = pct;
-            // Verde > 50 %, ámbar 20-50 %, rojo < 20 % (cerca del corte de 11.0 V ≈ 10 %)
+            // Verde > 50 %, ámbar 20-50 %, rojo < 20 % (cerca del corte de 10.8 V ≈ 8 %)
             const color = pct > 50 ? '#2ecc71' : (pct >= 20 ? '#F59E0B' : '#EF4444');
             card.style.borderTop = `3px solid ${color}`;
         }

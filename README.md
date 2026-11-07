@@ -20,7 +20,7 @@ Funciona con energía solar en campo (Santa Marta, Colombia):
 - **Ahorro de energía:** deep sleep fuera de los horarios. Durante el sueño despierta cada
   30 min para registrar el voltaje de la batería.
 - **Protección de batería:**
-  - Bajo 11.0 V se bloquean la luz y los ventiladores; se reconectan sobre 11.4 V.
+  - Bajo 10.8 V se bloquean la luz y los ventiladores; se reconectan sobre 11.4 V.
   - Bajo 10.2 V (batería crítica) deja de escribir en la SD y duerme; se reanuda sobre
     10.6 V. Esto evita dañar la SD si el BMS corta la energía. El respaldo interno sigue
     registrando el voltaje.
