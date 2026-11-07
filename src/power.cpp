@@ -68,6 +68,44 @@ void IRAM_ATTR WakeButton_rutine()
 }
 
 // ---------------------------------------------------------------------------
+// Fuente de alimentación: batería o USB (banco de pruebas)
+// ---------------------------------------------------------------------------
+// En el banco, con la batería desconectada y el ESP32 alimentado por su USB, el INA219
+// lee ~4.4-5 V. Sin este modo eso parecía una batería crítica: bloqueaba todo y se
+// dormía al arrancar, así que no se podía probar.
+
+static bool isUsbPowerReading(float volts)
+{
+  return volts >= USB_POWER_MIN_V && volts <= USB_POWER_MAX_V;
+}
+
+// Entra o sale del modo banco. Al entrar se levantan los bloqueos de batería: son de
+// una batería que ya no está alimentando el circuito (y con los ~5 V del USB volverían
+// a bloquear todo). logNow = false al arrancar: el evento se registra en setup() cuando
+// la SD ya está montada.
+static void setUsbPowered(bool on, bool logNow)
+{
+  systemData.usbPowered = on;
+  if (!on)
+  {
+    Serial.printf("Batería de nuevo (%.2f V): operación normal\n", systemData.busVoltage);
+    return;
+  }
+  lowBatteryLock = false;
+  criticalBatteryLock = false;
+  Serial.printf("MODO BANCO (USB, %.2f V, sin batería): no se duerme, protecciones de batería en pausa y AP encendido\n",
+                systemData.busVoltage);
+  if (logNow)
+    logProtectionEvent(EV_ALIMENTACION_USB); // marca en BAT_Data que lo que sigue son datos de prueba
+}
+
+void updatePowerSourceAtBoot()
+{
+  if (isUsbPowerReading(systemData.busVoltage))
+    setUsbPowered(true, false);
+}
+
+// ---------------------------------------------------------------------------
 // Deep sleep
 // ---------------------------------------------------------------------------
 
@@ -159,6 +197,9 @@ bool quickBatterySample()
 
   // Se mide antes de montar la SD: con la batería crítica ni se toca
   sampleBatteryNow();
+  updatePowerSourceAtBoot();
+  if (systemData.usbPowered)
+    return false; // Banco de pruebas (USB): arranque completo y no se vuelve a dormir
   backupBegin(); // montar solo lee (salvo el primer formateo)
   updateCriticalBatteryAtBoot();
   if (anyWakeWindowActive())
@@ -185,6 +226,10 @@ bool quickBatterySample()
 
 void checkDeepSleep()
 {
+  // En el banco de pruebas (USB, sin batería) no se duerme
+  if (systemData.usbPowered)
+    return;
+
   // Verificación de anulaciones manuales (LED y Ventiladores). Con la protección
   // por bajo voltaje activa no cuentan: igual no pueden encender nada.
   bool anyManualOverride = false;
@@ -236,9 +281,9 @@ void checkDeepSleep()
   }
 }
 
-// true cuando wantChange se sostuvo LOW_BAT_CONFIRM_MS seguidos (pending/since
-// guardan entre llamadas si la condición de cambio se está cumpliendo y desde cuándo)
-bool changeConfirmed(bool wantChange, bool &pending, unsigned long &since)
+// true cuando wantChange se sostuvo confirmMs seguidos (pending/since guardan entre
+// llamadas si la condición de cambio se está cumpliendo y desde cuándo)
+static bool changeConfirmed(bool wantChange, bool &pending, unsigned long &since, unsigned long confirmMs)
 {
   if (!wantChange)
   {
@@ -251,24 +296,34 @@ bool changeConfirmed(bool wantChange, bool &pending, unsigned long &since)
     since = millis();
     return false;
   }
-  if (millis() - since < LOW_BAT_CONFIRM_MS)
+  if (millis() - since < confirmMs)
     return false;
   pending = false;
   return true;
 }
 
-// Protección por bajo voltaje (ver LOW_BAT_* y CRIT_BAT_*). Se llama desde taskComm,
-// que es la única tarea que escribe en la SD, para registrar el corte y la reconexión.
+// Protección por bajo voltaje (ver LOW_BAT_* y CRIT_BAT_*) y detección del modo banco
+// (USB). Se llama desde taskComm, que es la única tarea que escribe en la SD, para
+// registrar el corte y la reconexión.
 void updateLowBatteryProtection()
 {
-  static bool lowPending = false, critPending = false;
-  static unsigned long lowSince = 0, critSince = 0;
+  static bool lowPending = false, critPending = false, usbPending = false;
+  static unsigned long lowSince = 0, critSince = 0, usbSince = 0;
 
   if (!systemData.inaAvailable || systemData.busVoltage <= 0)
     return; // Sin medición no se protege (ni se bloquea)
   float v = systemData.busVoltage;
 
-  if (changeConfirmed(lowBatteryLock ? (v >= LOW_BAT_RECONNECT_V) : (v < LOW_BAT_CUTOFF_V), lowPending, lowSince))
+  // ¿Cambió la fuente? (se conecta o desconecta la batería con el USB puesto)
+  if (changeConfirmed(isUsbPowerReading(v) != systemData.usbPowered, usbPending, usbSince, USB_POWER_CONFIRM_MS))
+    setUsbPowered(!systemData.usbPowered, true);
+  if (systemData.usbPowered)
+  {
+    lowPending = critPending = false; // al volver la batería se evalúa desde cero
+    return;                           // en el banco no hay batería que proteger
+  }
+
+  if (changeConfirmed(lowBatteryLock ? (v >= LOW_BAT_RECONNECT_V) : (v < LOW_BAT_CUTOFF_V), lowPending, lowSince, LOW_BAT_CONFIRM_MS))
   {
     lowBatteryLock = !lowBatteryLock;
     Serial.printf("Protección por bajo voltaje: %s (%.2f V)\n",
@@ -276,7 +331,7 @@ void updateLowBatteryProtection()
     logProtectionEvent(lowBatteryLock ? EV_CORTE_BAJO_V : EV_RECONEXION);
   }
 
-  if (changeConfirmed(criticalBatteryLock ? (v >= CRIT_BAT_RECONNECT_V) : (v < CRIT_BAT_CUTOFF_V), critPending, critSince))
+  if (changeConfirmed(criticalBatteryLock ? (v >= CRIT_BAT_RECONNECT_V) : (v < CRIT_BAT_CUTOFF_V), critPending, critSince, LOW_BAT_CONFIRM_MS))
   {
     // BAT_CRITICA se registra antes de bloquear: es la última fila de la SD hasta que
     // el voltaje se recupere (el respaldo interno sigue con las filas BAT)
@@ -309,6 +364,9 @@ void sampleBatteryNow()
 // antes de llamar a esta función).
 void updateCriticalBatteryAtBoot()
 {
+  if (systemData.usbPowered)
+    return; // banco de pruebas: los ~5 V del USB no son una batería crítica
+
   if (!criticalBatteryLock && systemData.busVoltage < CRIT_BAT_CUTOFF_V)
   {
     criticalBatteryLock = true;

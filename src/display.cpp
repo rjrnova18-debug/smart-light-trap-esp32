@@ -222,6 +222,10 @@ void showData()
     {
       display.println("Modo: SEGURO (RTC)"); // sin hora válida no se opera por horario
     }
+    else if (systemData.usbPowered)
+    {
+      display.println("Modo: BANCO (USB)"); // sin batería: no duerme, AP encendido
+    }
     else if (forceAwakeActive())
     {
       display.println("Modo: DESPIERTO (EXT)");

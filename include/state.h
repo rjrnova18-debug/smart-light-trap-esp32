@@ -24,6 +24,7 @@ struct SystemData
   // si es false la trampa está en modo seguro y no opera por horario)
   bool rtcAvailable, bmeAvailable, inaAvailable, sdAvailable, oledAvailable;
   bool backupAvailable; // respaldo LittleFS en la flash interna montado
+  bool usbPowered;      // modo banco: ESP32 alimentado por USB, batería desconectada (ver USB_POWER_*)
 };
 
 extern SystemData systemData;

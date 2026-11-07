@@ -21,6 +21,7 @@ enum BatEvent : uint8_t
   EV_SD_FALLA = 9,       // la SD falló SD_MAX_FAILS veces seguidas y se dejó de usar
   EV_REINICIO_ERROR = 10,    // el arranque anterior terminó por un error del firmware (panic o watchdog)
   EV_REINICIO_BROWNOUT = 11, // el arranque anterior terminó por una caída de voltaje (brownout)
+  EV_ALIMENTACION_USB = 12,  // modo banco: alimentada por USB sin batería (las filas siguientes son de prueba)
   EV_COUNT
 };
 

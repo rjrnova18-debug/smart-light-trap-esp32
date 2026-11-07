@@ -137,6 +137,10 @@ Las tres están vigiladas por el watchdog (ver [Robustez](#robustez)). La tarea 
    se crean solas.
 4. **Usar:** conéctate al WiFi de la trampa dentro de su horario o pulsando el botón del
    pin 32, y abre `http://192.168.4.1`.
+5. **Probar en el banco:** con la batería desconectada y el ESP32 alimentado por su USB, entra
+   sola en **modo banco** (no se duerme y el WiFi queda encendido; ver [Robustez](#robustez)).
+   Antes de llevarla a campo, borra los datos de prueba en la pestaña **Archivos** (SD y
+   memoria interna).
 
 ### Actualizar por WiFi
 
@@ -153,7 +157,7 @@ Hay un archivo CSV por día, dentro de una carpeta por mes (`AAAA-MM`):
 |---|---|
 | `BME_Data` | Fecha, hora, temperatura, humedad, presión, altitud (cada 5 min) |
 | `INA_Data` | Fecha, hora, estado de luz, ventiladores y AP, potencia y energía acumulada del día (cada 5 min) |
-| `BAT_Data` | Voltaje y corriente con el evento que lo originó: `INICIO`, `PERIODICO`, `MUESTREO`, `DORMIR`, `CORTE_BAJO_V`, `RECONEXION`, `BAT_CRITICA`, `MODO_CARGA_ON/OFF`, `SD_FALLA`, `REINICIO_ERROR` (el arranque anterior terminó por un error o el watchdog), `REINICIO_BROWNOUT` (por una caída de voltaje) |
+| `BAT_Data` | Voltaje y corriente con el evento que lo originó: `INICIO`, `PERIODICO`, `MUESTREO`, `DORMIR`, `CORTE_BAJO_V`, `RECONEXION`, `BAT_CRITICA`, `MODO_CARGA_ON/OFF`, `SD_FALLA`, `REINICIO_ERROR` (el arranque anterior terminó por un error o el watchdog), `REINICIO_BROWNOUT` (por una caída de voltaje), `ALIMENTACION_USB` (empezó el modo banco: lo que sigue son datos de prueba) |
 | `Fans_Data` | Cada activación de un área (enciende sus ventiladores) con el conteo que la disparó |
 
 > Desde el 07-11-2026, `Fans_Data` tiene una fila por activación de **área** con el número
@@ -220,6 +224,7 @@ graves:
 | El reloj (RTC) no responde o da una hora imposible | **Modo seguro**: se conserva la última hora buena. Tras ~1 s de lecturas malas la trampa deja de operar por horario (luz y ventiladores apagados, sin registros con fechas falsas), duerme y reintenta cada 30 min. El dashboard y la OLED lo avisan; el control manual y el botón del pin 32 siguen funcionando |
 | Una configuración de horarios llega incompleta | `/saveWindows` la rechaza sin cambiar nada |
 | La SD falla | Se deja de usar tras 3 errores seguidos (evento `SD_FALLA`); el respaldo interno sigue |
+| Pruebas en el banco, alimentada por el USB del ESP32 y sin batería | **Modo banco:** el INA219 lee ~4,4–5 V, algo imposible para una batería 3S mientras alimenta el circuito (el BMS corta antes). Entonces no se duerme, las protecciones de batería quedan en pausa y el WiFi queda encendido. El dashboard y la OLED lo avisan, y la fila `ALIMENTACION_USB` marca los datos de prueba. Durante la operación el cambio se confirma tras 5 s de lectura sostenida |
 
 **Diagnóstico por serial:** el comando `diag` muestra la pila libre mínima de cada tarea, la
 memoria libre, el motivo del último arranque y si el firmware está confirmado o a prueba.

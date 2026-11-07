@@ -46,6 +46,14 @@
                 </div>
             </div>
 
+            <div id="usbBanner" class="manual-banner" style="display: none;">
+                <span class="manual-banner-icon">🧪</span>
+                <div class="manual-banner-text">
+                    <div class="manual-banner-title">Alimentada por USB: modo banco</div>
+                    <div class="manual-banner-subtitle">El INA219 lee ~5 V: la batería está desconectada o apagada. No se duerme, las protecciones de batería están en pausa y el WiFi queda encendido. Los datos de prueba quedan marcados con ALIMENTACION_USB en BAT_Data: bórralos (pestaña Archivos) antes de llevar la trampa a campo.</div>
+                </div>
+            </div>
+
             <div id="rtcBanner" class="manual-banner" style="display: none;">
                 <span class="manual-banner-icon">🕒</span>
                 <div class="manual-banner-text">
@@ -929,6 +937,9 @@
                 // Modo seguro: sin hora válida del RTC (rtcOk === false; undefined = firmware anterior)
                 document.getElementById('rtcBanner').style.display = data.rtcOk === false ? 'flex' : 'none';
 
+                // Modo banco: alimentada por USB sin batería
+                document.getElementById('usbBanner').style.display = data.usbPower ? 'flex' : 'none';
+
                 // Modo solo carga y pantalla OLED (tarjeta "Energía y pantalla")
                 document.getElementById('chargeModeBanner').style.display = data.chargeMode ? 'flex' : 'none';
                 updateToggleButton(document.getElementById('btn-charge-mode'), !!data.chargeMode);
@@ -1783,6 +1794,12 @@
             const countdownEl = document.getElementById('apCloseCountdown');
             const prefixEl = document.getElementById('apCloseWarningPrefix');
             if (!banner || !countdownEl || !prefixEl || typeof data.second === 'undefined') return;
+
+            // Modo banco (USB): el AP no se apaga, no hay cierre que avisar
+            if (data.usbPower) {
+                banner.style.display = 'none';
+                return;
+            }
 
             let secondsRemaining;
             let extended = false;

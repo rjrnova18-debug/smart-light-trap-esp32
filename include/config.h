@@ -112,6 +112,16 @@ const unsigned long LOW_BAT_CONFIRM_MS = 30000;
 const float CRIT_BAT_CUTOFF_V = 10.2;    // ≈ 3.4 V/celda (~5 %), muy por encima del corte del BMS
 const float CRIT_BAT_RECONNECT_V = 10.6; // la histéresis evita despertar y volver a dormir en cada muestreo
 
+// -------- ALIMENTACIÓN POR USB (BANCO DE PRUEBAS) --------
+// La batería 3S nunca está en esta franja mientras alimenta el circuito: el BMS corta
+// mucho antes (~7.5-9 V). Si el INA219 lee esto, el ESP32 está alimentado por su USB
+// con la batería desconectada o apagada: MODO BANCO (no se duerme, las protecciones de
+// batería quedan en pausa y el AP queda encendido). La franja excluye 0 V a propósito:
+// un INA219 que falla y lee 0 no debe dejar despierta a una trampa en campo.
+const float USB_POWER_MIN_V = 4.0;
+const float USB_POWER_MAX_V = 5.6;
+const unsigned long USB_POWER_CONFIRM_MS = 5000; // durante la operación, la lectura se sostiene 5 s antes de cambiar
+
 // OLED encendida temporalmente por el botón del pin 35 (ver oledTempOn)
 const unsigned long OLED_TEMP_ON_MS = 120000;
 

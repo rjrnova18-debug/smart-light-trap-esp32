@@ -98,8 +98,9 @@ void taskComm(void *pvParameters)
     // Un firmware recién instalado por OTA se confirma tras OTA_TRIAL_MS funcionando
     healthCheckFirmware();
 
-    // Lógica de la ventana del AP (con la batería crítica solo el botón/"Posponer" lo enciende)
-    bool shouldBeActive = (operatingWindow_AP() && !criticalBatteryLock) || forceAwakeActive();
+    // Lógica de la ventana del AP (con la batería crítica solo el botón/"Posponer" lo
+    // enciende; en el banco de pruebas, alimentada por USB, queda siempre encendido)
+    bool shouldBeActive = (operatingWindow_AP() && !criticalBatteryLock) || forceAwakeActive() || systemData.usbPowered;
     if (shouldBeActive && !apIsActive)
     {
       // Encendido completo
@@ -285,10 +286,12 @@ void setup()
   // Batería crítica (p. ej. el BMS acaba de reconectar al amanecer): volver a
   // dormir sin montar la SD ni encender el WiFi, para no repetir el ciclo arrancar →
   // escribir → el BMS corta otra vez. Despertado por el botón sí arranca (sin
-  // escribir en la SD) para poder revisar la trampa en campo.
+  // escribir en la SD) para poder revisar la trampa en campo. Alimentada por USB
+  // (~5 V, sin batería) es el banco de pruebas: no cuenta como batería crítica.
   if (systemData.inaAvailable)
   {
     sampleBatteryNow();
+    updatePowerSourceAtBoot();
     updateCriticalBatteryAtBoot();
     if (criticalBatteryLock && wakeup_reason != ESP_SLEEP_WAKEUP_EXT0)
       enterDeepSleep(); // sin hora válida, enterDeepSleep() duerme el periodo de muestreo
@@ -337,6 +340,9 @@ void setup()
     if (loggingAllowed())
       logBattery(resetEvent);
   }
+  // Arrancó en el banco de pruebas (USB): las filas que siguen son datos de prueba
+  if (systemData.usbPowered && loggingAllowed())
+    logBattery(EV_ALIMENTACION_USB);
 
   // Rutas del servidor web. El AP y el servidor arrancan en taskComm, solo dentro de
   // su ventana horaria (o con el botón del pin 32).

@@ -119,6 +119,8 @@ void handleEstado()
 
   // Sin hora confiable del RTC la trampa está en modo seguro (aviso en el dashboard)
   doc["rtcOk"] = systemData.rtcAvailable;
+  // Alimentada por USB sin batería: modo banco (aviso en el dashboard)
+  doc["usbPower"] = systemData.usbPowered;
 
   doc["fanDur"] = FAN_ON_TIME / 60000; // Lo enviamos en minutos al HTML
   doc["threshold"] = AREA_THRESHOLD;

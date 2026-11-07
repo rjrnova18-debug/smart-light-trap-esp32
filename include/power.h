@@ -16,4 +16,5 @@ bool quickBatterySample();           // Despertar de muestreo: guarda el voltaje
 void checkDeepSleep();               // Duerme si no queda ninguna ventana ni override activo
 void updateLowBatteryProtection();   // Bloquea luz/ventiladores (y la SD si es crítica) por bajo voltaje
 void sampleBatteryNow();             // Mide la batería al despertar, antes de montar la SD
+void updatePowerSourceAtBoot();      // Con esa medición: ¿batería o USB (modo banco)? (ver USB_POWER_*)
 void updateCriticalBatteryAtBoot();  // Bloqueo crítico con la medición del despertar
