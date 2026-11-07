@@ -16,6 +16,8 @@
 #include "backup.h"
 #include "display.h"
 #include "web_server.h"
+#include "health.h"
+#include "serial_commands.h"
 
 // WiFi del punto de acceso (ver include/secrets.h)
 const char *ssid = WIFI_SSID;
@@ -24,10 +26,23 @@ const char *password = WIFI_PASSWORD;
 int lastLogMinute = -1; // minuto del último registro periódico (ver LOG_EVERY_MIN)
 bool batWakeLogged = false; // false hasta registrar la primera fila del ciclo (deep sleep reinicia el ESP32)
 
+// Solo si faltara memoria al crear el mutex, la cola o las tareas (ver setup())
+static void restartForLackOfMemory()
+{
+  Serial.println("[ERROR] No hubo memoria para crear las tareas: reiniciando");
+  delay(1000);
+  ESP.restart();
+}
+
+// Las tres tareas están vigiladas por el watchdog (ver health.h): en cada vuelta
+// avisan "sigo viva" con healthFeed(). Si una se cuelga, el ESP32 se reinicia.
+
 void taskControl(void *pvParameters)
 {
+  healthWatchThisTask();
   for (;;)
   {
+    healthFeed();
     readIRSensors();
     LED_Operation();
     evaluateAreas();
@@ -38,13 +53,14 @@ void taskControl(void *pvParameters)
 
 void taskUI(void *pvParameters)
 {
+  healthWatchThisTask();
   for (;;)
   {
+    healthFeed();
     // Protegemos el bus I2C para leer sensor y escribir en OLED
     if (xSemaphoreTake(xI2C_Mutex, pdMS_TO_TICKS(100)) == pdTRUE)
     {
-      if (systemData.rtcAvailable)
-        getTime();
+      getTime(); // siempre: si el RTC dejó de responder, así se detecta la recuperación
       if (systemData.bmeAvailable)
         readBME();
       if (systemData.inaAvailable)
@@ -75,10 +91,15 @@ void taskUI(void *pvParameters)
 
 void taskComm(void *pvParameters)
 {
+  healthWatchThisTask();
   for (;;)
   {
+    healthFeed();
+    // Un firmware recién instalado por OTA se confirma tras OTA_TRIAL_MS funcionando
+    healthCheckFirmware();
+
     // Lógica de la ventana del AP (con la batería crítica solo el botón/"Posponer" lo enciende)
-    bool shouldBeActive = (operatingWindow_AP() && !criticalBatteryLock) || forceAwake;
+    bool shouldBeActive = (operatingWindow_AP() && !criticalBatteryLock) || forceAwakeActive();
     if (shouldBeActive && !apIsActive)
     {
       // Encendido completo
@@ -108,8 +129,8 @@ void taskComm(void *pvParameters)
     // Protección por bajo voltaje (registra CORTE_BAJO_V / RECONEXION)
     updateLowBatteryProtection();
 
-    // Comandos "respaldo ..." por el Monitor serial (extracción por cable)
-    backupHandleSerial();
+    // Comandos por el Monitor serial: respaldo, diag, ayuda (ver serial_commands.h)
+    serialCommandsPoll();
 
     // Registros (SD y respaldo interno): siempre que el equipo esté despierto (ya no
     // depende de la ventana SD), en cada minuto múltiplo de LOG_EVERY_MIN. Con la
@@ -169,8 +190,7 @@ void setup()
   esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
   if (wakeup_reason == ESP_SLEEP_WAKEUP_EXT0)
   {
-    forceAwake = true;
-    forceAwakeStart = millis();
+    forceAwakeStartNow();
     Serial.println("Despertado por BOTÓN: Modo espera activo (5 min)");
   }
   else if (wakeup_reason == ESP_SLEEP_WAKEUP_TIMER)
@@ -222,25 +242,19 @@ void setup()
   Wire.begin(SDA_PIN, SCL_PIN);
   Serial.println("I2C iniciado");
 
-  // RTC DS1307
-  if (!rtc.begin())
-  {
-    Serial.println("[ERROR] No se encontró el RTC");
-    systemData.rtcAvailable = false;
-  }
-  else
-  {
-    Serial.println("RTC encontrado");
-    systemData.rtcAvailable = true;
-  }
-  if (systemData.rtcAvailable && !rtc.isrunning())
+  // RTC DS1307. systemData.rtcAvailable ("hay hora confiable") lo decide getTime():
+  // sin una lectura válida la trampa arranca en modo seguro (no opera por horario).
+  bool rtcFound = rtc.begin();
+  Serial.println(rtcFound ? "RTC encontrado" : "[ERROR] No se encontró el RTC");
+  if (rtcFound && !rtc.isrunning())
   {
     // DS1307 sin hora (pila agotada o primer uso): se pone la fecha de compilación,
     // que puede estar atrasada. Hay que corregirla desde el dashboard (Configuración).
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
     Serial.println("[AVISO] El RTC no tenía hora: se ajustó a la fecha de compilación. Corrígela desde el dashboard");
   }
-  getTime(); // Obtener tiempo inicial
+  if (!getTime()) // Obtener tiempo inicial
+    Serial.println("[ERROR] El RTC no da una hora válida: MODO SEGURO (sin horario) hasta que responda");
 
   // BME280
   if (!bme.begin(BME_ADDR))
@@ -276,8 +290,8 @@ void setup()
   {
     sampleBatteryNow();
     updateCriticalBatteryAtBoot();
-    if (criticalBatteryLock && systemData.rtcAvailable && wakeup_reason != ESP_SLEEP_WAKEUP_EXT0)
-      enterDeepSleep();
+    if (criticalBatteryLock && wakeup_reason != ESP_SLEEP_WAKEUP_EXT0)
+      enterDeepSleep(); // sin hora válida, enterDeepSleep() duerme el periodo de muestreo
   }
   // SD Card
   if (!SD.begin(SD_CS))
@@ -314,6 +328,16 @@ void setup()
   Serial.print("Energía inicializada en: ");
   Serial.println(systemData.totalEnergy_Wh);
 
+  // Si el arranque anterior terminó por una falla (error del firmware, watchdog o caída
+  // de voltaje), queda registrado en BAT_Data: en campo es la única forma de saberlo.
+  BatEvent resetEvent;
+  if (healthLastResetWasFailure(resetEvent))
+  {
+    Serial.printf("[AVISO] El arranque anterior terminó por una falla: %s\n", batEventName(resetEvent));
+    if (loggingAllowed())
+      logBattery(resetEvent);
+  }
+
   // Rutas del servidor web. El AP y el servidor arrancan en taskComm, solo dentro de
   // su ventana horaria (o con el botón del pin 32).
   setupWebServer();
@@ -335,19 +359,39 @@ void setup()
     Serial.println("[ERROR] OLED no encontrada: se sigue sin pantalla");
   }
 
+  // Watchdog de las tareas (cada tarea se suscribe al empezar, ver health.h)
+  healthBegin();
+
   // Crear el Mutex para proteger el bus I2C
   xI2C_Mutex = xSemaphoreCreateMutex();
   // Cola de eventos de ventilador (taskControl -> taskComm, que escribe en la SD)
   fanEventQueue = xQueueCreate(16, sizeof(FanEvent));
+  // Sin el mutex, la cola o alguna tarea la trampa no puede funcionar (solo pasaría si
+  // faltara memoria): mejor reiniciar que seguir a medias.
+  if (xI2C_Mutex == NULL || fanEventQueue == NULL)
+    restartForLackOfMemory();
+
+  TaskHandle_t controlTask = NULL, uiTask = NULL, commTask = NULL;
   // Tarea 1: Control de Sensores IR y Ventiladores (Núcleo 1, Prioridad máxima)
-  xTaskCreatePinnedToCore(taskControl, "ControlTask", 4096, NULL, 3, NULL, 1);
+  xTaskCreatePinnedToCore(taskControl, "ControlTask", 4096, NULL, 3, &controlTask, 1);
   // Tarea 2: Lectura BME y Pantalla OLED (Núcleo 1, Prioridad media)
-  xTaskCreatePinnedToCore(taskUI, "UITask", 4096, NULL, 2, NULL, 1);
+  xTaskCreatePinnedToCore(taskUI, "UITask", 4096, NULL, 2, &uiTask, 1);
   // Tarea 3: WebServer y SD (Núcleo 0, Prioridad baja - Tareas pesadas)
-  xTaskCreatePinnedToCore(taskComm, "CommTask", 8192, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(taskComm, "CommTask", 8192, NULL, 1, &commTask, 0);
+  if (controlTask == NULL || uiTask == NULL || commTask == NULL)
+    restartForLackOfMemory();
+
+  // Para mostrar la pila libre de cada tarea con el comando serie "diag"
+  healthRegisterTask(controlTask, "ControlTask");
+  healthRegisterTask(uiTask, "UITask");
+  healthRegisterTask(commTask, "CommTask");
 }
 
 void loop()
 {
-  // El loop principal queda vacío, las tareas se ejecutan en paralelo
+  // Todo corre en las tres tareas de arriba. Esta tarea de Arduino (loopTask) ya no
+  // tiene nada que hacer: se borra a sí misma. Si quedara llamando a un loop() vacío,
+  // giraría sin pausa y el núcleo 1 nunca entraría en reposo (más consumo). Además se
+  // liberan sus 8 KB de pila.
+  vTaskDelete(NULL);
 }

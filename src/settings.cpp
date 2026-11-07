@@ -117,12 +117,22 @@ void saveSettingsToNVS()
   preferences.end();
 }
 
+// true si la hora actual está dentro de la ventana [inicio, fin). Dos casos especiales:
+//  - Modo seguro: sin hora confiable del RTC ninguna ventana está activa (la trampa no
+//    opera por horario; el control manual y el botón del pin 32 siguen funcionando).
+//  - Inicio = fin: ventana vacía (desactivada). Antes contaba como "siempre activa", así
+//    que un horario guardado en 00:00-00:00 dejaba el AP o la luz encendidos todo el día.
 bool isInsideWindow(int startH, int startM, int endH, int endM)
 {
+  if (!systemData.rtcAvailable)
+    return false;
+
   int current = systemData.hour * 60 + systemData.minute;
   int start = startH * 60 + startM;
   int end = endH * 60 + endM;
 
+  if (start == end)
+    return false;
   if (start < end)
   {
     // ventana normal (no cruza medianoche)

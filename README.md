@@ -15,7 +15,8 @@ Funciona con energía solar en campo (Santa Marta, Colombia):
   umbral de detecciones, se encienden los ventiladores del área, con un límite de
   ventiladores simultáneos.
 - **Horarios configurables:** luz, ventiladores, ventana extra de la SD y dos franjas
-  del punto de acceso (mañana y tarde/noche).
+  del punto de acceso (mañana y tarde/noche). Una ventana con inicio = fin queda
+  desactivada.
 - **Ahorro de energía:** deep sleep fuera de los horarios. Durante el sueño despierta cada
   30 min para registrar el voltaje de la batería.
 - **Protección de batería:**
@@ -37,6 +38,9 @@ Funciona con energía solar en campo (Santa Marta, Colombia):
     esté puesta.
 - **Mantenimiento remoto (`/admin`):** actualizar el firmware por WiFi (OTA) sin abrir la
   trampa (con eso también se actualiza el dashboard) y descargar todos los datos.
+- **Robustez para operar sola en campo:** watchdog de tareas, vuelta automática al
+  firmware anterior si una OTA falla y modo seguro si el reloj deja de dar la hora (ver
+  [Robustez](#robustez)).
 
 ## Hardware
 
@@ -87,6 +91,8 @@ src/
   backup_files.cpp    el respaldo en el explorador del dashboard (src=flash)
   sd_files.cpp        explorador de la SD: listar, .zip y borrar
   zip_stream.cpp      .zip armado mientras se envía (SD y respaldo)
+  health.cpp          salud del firmware: watchdog, rollback de la OTA y diagnóstico
+  serial_commands.cpp comandos por el Monitor serial (respaldo, diag, ayuda)
   display.cpp         OLED y botón de pantalla
   web_server.cpp      dashboard, API, /admin y OTA
 web/                  dashboard: dashboard.html, style.css, chart.js (se editan aquí)
@@ -112,6 +118,9 @@ El firmware usa tres tareas FreeRTOS:
 | `taskControl` | 1 | Sensores IR, luz y ventiladores (cada 2 ms) |
 | `taskUI` | 1 | RTC, BME280, INA219 y OLED |
 | `taskComm` | 0 | WiFi, servidor web, registros, comandos serie y deep sleep. Es la única tarea que escribe en la SD y en el respaldo |
+
+Las tres están vigiladas por el watchdog (ver [Robustez](#robustez)). La tarea de Arduino
+(`loop()`) se borra al terminar `setup()`: así el núcleo 1 puede entrar en reposo.
 
 ## Puesta en marcha
 
@@ -144,7 +153,7 @@ Hay un archivo CSV por día, dentro de una carpeta por mes (`AAAA-MM`):
 |---|---|
 | `BME_Data` | Fecha, hora, temperatura, humedad, presión, altitud (cada 5 min) |
 | `INA_Data` | Fecha, hora, estado de luz, ventiladores y AP, potencia y energía acumulada del día (cada 5 min) |
-| `BAT_Data` | Voltaje y corriente con el evento que lo originó: `INICIO`, `PERIODICO`, `MUESTREO`, `DORMIR`, `CORTE_BAJO_V`, `RECONEXION`, `BAT_CRITICA`, `MODO_CARGA_ON/OFF`, `SD_FALLA` |
+| `BAT_Data` | Voltaje y corriente con el evento que lo originó: `INICIO`, `PERIODICO`, `MUESTREO`, `DORMIR`, `CORTE_BAJO_V`, `RECONEXION`, `BAT_CRITICA`, `MODO_CARGA_ON/OFF`, `SD_FALLA`, `REINICIO_ERROR` (el arranque anterior terminó por un error o el watchdog), `REINICIO_BROWNOUT` (por una caída de voltaje) |
 | `Fans_Data` | Cada activación de un área (enciende sus ventiladores) con el conteo que la disparó |
 
 > Desde el 07-11-2026, `Fans_Data` tiene una fila por activación de **área** con el número
@@ -180,7 +189,7 @@ y en [tools/respaldo_a_csv.py](tools/respaldo_a_csv.py).
 |---|---|---|
 | Dashboard | Uso normal | Pestaña **Archivos** (o **Historial** para graficar) → Origen: **Memoria interna**. Las carpetas son las mismas que en la SD; se descarga por día, por mes o todo en `.zip` |
 | `/admin` | Si el dashboard falla | Enlace **Todo el respaldo interno (.zip)** |
-| Monitor serial | Si el WiFi falla | Pulsa el botón del pin 32 para despertarla y escribe `respaldo` (resumen) o `respaldo bme 2026-11` (CSV del mes; también `ina`, `bat`, `fan` o un día `AAAA-MM-DD`). Cada comando la mantiene despierta 5 min más |
+| Monitor serial | Si el WiFi falla | Pulsa el botón del pin 32 para despertarla y escribe `respaldo` (resumen) o `respaldo bme 2026-11` (CSV del mes; también `ina`, `bat`, `fan` o un día `AAAA-MM-DD`). `ayuda` lista los comandos. Cada comando la mantiene despierta 5 min más |
 | esptool | Si el firmware no arranca | Ver abajo |
 
 El `.zip` tiene la misma estructura de carpetas que la SD: descomprimido en una SD nueva,
@@ -198,6 +207,26 @@ python tools/respaldo_a_csv.py respaldo_bin respaldo_csv
 > ⚠️ `pio run -t erase` y `pio run -t uploadfs` **borran el respaldo**. `pio run -t upload`
 > y la OTA no lo tocan. Antes de borrar la flash de una trampa de campo, descarga el
 > respaldo.
+
+## Robustez
+
+La trampa pasa meses sola en campo, así que el firmware se protege de fallas raras pero
+graves:
+
+| Falla | Qué hace el firmware |
+|---|---|
+| Una tarea se cuelga (p. ej. una SD que bloquea el bus) | **Watchdog** de 30 s sobre las tres tareas: el ESP32 se reinicia en vez de quedar despierto sin registrar ni proteger la batería. Los trabajos largos (`.zip`, exportaciones, OTA) avisan "sigo viva" por el camino. Al volver, queda la fila `REINICIO_ERROR` en `BAT_Data` |
+| Una OTA instala un firmware que se cuelga o se reinicia | **Rollback**: el firmware nuevo queda a prueba hasta funcionar 60 s (o hasta dormir). Si antes se reinicia, el bootloader vuelve solo al anterior |
+| El reloj (RTC) no responde o da una hora imposible | **Modo seguro**: se conserva la última hora buena. Tras ~1 s de lecturas malas la trampa deja de operar por horario (luz y ventiladores apagados, sin registros con fechas falsas), duerme y reintenta cada 30 min. El dashboard y la OLED lo avisan; el control manual y el botón del pin 32 siguen funcionando |
+| Una configuración de horarios llega incompleta | `/saveWindows` la rechaza sin cambiar nada |
+| La SD falla | Se deja de usar tras 3 errores seguidos (evento `SD_FALLA`); el respaldo interno sigue |
+
+**Diagnóstico por serial:** el comando `diag` muestra la pila libre mínima de cada tarea, la
+memoria libre, el motivo del último arranque y si el firmware está confirmado o a prueba.
+
+**Uso de recursos** (firmware del 07-11-2026): Flash 86 % de 1,25 MB (1.129.373 B), RAM
+estática 15,9 % (52 KB). Pilas: `ControlTask` 4 KB, `UITask` 4 KB, `CommTask` 8 KB. El margen
+real de cada pila se mide con `diag` en el equipo.
 
 ## Dependencias
 

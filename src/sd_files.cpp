@@ -9,6 +9,7 @@
 #include "web_server.h"
 #include "zip_stream.h"
 #include "backup_files.h"
+#include "health.h"
 
 const int SD_MAX_DEPTH = 4; // niveles bajo la carpeta pedida (raíz/BAT_Data/2026-10/x.csv = 3)
 
@@ -71,6 +72,7 @@ bool walkSdFiles(const String &dirPath, const String &relPrefix, int depth,
 // los nombres y después borra (borrar mientras se recorre no es seguro).
 bool deleteSdPath(const String &path, int depth)
 {
+  healthFeed(); // borrar una carpeta con meses de datos puede tardar varios segundos
   File f = SD.open(path);
   if (!f)
     return false;

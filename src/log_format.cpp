@@ -2,7 +2,8 @@
 
 static const char *const BAT_EVENT_NAMES[EV_COUNT] = {
     "INICIO", "PERIODICO", "DORMIR", "MUESTREO", "CORTE_BAJO_V",
-    "RECONEXION", "BAT_CRITICA", "MODO_CARGA_ON", "MODO_CARGA_OFF", "SD_FALLA"};
+    "RECONEXION", "BAT_CRITICA", "MODO_CARGA_ON", "MODO_CARGA_OFF", "SD_FALLA",
+    "REINICIO_ERROR", "REINICIO_BROWNOUT"};
 
 const char *batEventName(uint8_t ev)
 {

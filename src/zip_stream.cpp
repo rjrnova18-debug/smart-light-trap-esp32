@@ -2,6 +2,7 @@
 #include "zip_stream.h"
 #include "state.h"
 #include "web_server.h"
+#include "health.h"
 
 const uint32_t ZIP_MAX_FILES = 3000; // 12 bytes de RAM por archivo (~2 años de datos de las 4 carpetas)
 
@@ -77,9 +78,13 @@ static void zipWriteName(const String &name)
 
 void sendZipStream(const String &baseName, const ZipWalkFn &walk)
 {
+  // Un .zip grande tarda decenas de segundos: en cada archivo de cada pasada se
+  // avisa al watchdog (healthFeed) para que no reinicie a mitad de la descarga.
   uint32_t fileCount = 0;
   walk([&](const String &, const ZipContentFn &)
-       { return ++fileCount <= ZIP_MAX_FILES; });
+       {
+    healthFeed();
+    return ++fileCount <= ZIP_MAX_FILES; });
   if (fileCount == 0)
   {
     server.send(404, "text/plain", "La carpeta está vacía");
@@ -111,6 +116,7 @@ void sendZipStream(const String &baseName, const ZipWalkFn &walk)
   // Pasada 1: encabezado local + datos + descriptor de cada archivo
   bool completed = walk([&](const String &name, const ZipContentFn &content)
                         {
+    healthFeed();
     if (entries.size() >= fileCount)
       return false;
     ZipEntry e = {0, 0, zipOffset};
@@ -136,7 +142,7 @@ void sendZipStream(const String &baseName, const ZipWalkFn &walk)
     zipWrite32(e.size); // sin compresión: tamaño comprimido = original
     zipWrite32(e.size);
     entries.push_back(e);
-    vTaskDelay(1); // deja correr las tareas de menor prioridad del núcleo 0 (watchdog)
+    vTaskDelay(1); // deja correr las tareas de menor prioridad del núcleo 0
     return (bool)server.client().connected(); });
   if (!completed)
   {
@@ -150,6 +156,7 @@ void sendZipStream(const String &baseName, const ZipWalkFn &walk)
   size_t idx = 0;
   walk([&](const String &name, const ZipContentFn &)
        {
+    healthFeed();
     if (idx >= entries.size())
       return false;
     const ZipEntry &e = entries[idx++];

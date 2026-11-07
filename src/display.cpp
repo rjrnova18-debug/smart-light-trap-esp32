@@ -5,6 +5,7 @@
 #include "state.h"
 #include "settings.h"
 #include "backup.h"
+#include "power.h"
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
@@ -191,7 +192,7 @@ void showData()
 
     // Ventana AP
     display.print("WiFi AP: ");
-    display.println(operatingWindow_AP() || forceAwake ? "ACTIVA" : "INACTIVA");
+    display.println(operatingWindow_AP() || forceAwakeActive() ? "ACTIVA" : "INACTIVA");
 
     // Ventana LED
     display.print("LEDs   : ");
@@ -217,7 +218,11 @@ void showData()
       if (manualFanOverride[i])
         fanManual = true;
 
-    if (forceAwake)
+    if (!systemData.rtcAvailable)
+    {
+      display.println("Modo: SEGURO (RTC)"); // sin hora válida no se opera por horario
+    }
+    else if (forceAwakeActive())
     {
       display.println("Modo: DESPIERTO (EXT)");
     }

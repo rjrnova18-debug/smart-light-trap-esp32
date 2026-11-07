@@ -86,4 +86,6 @@ bool backupParseDayFileName(BackupStream s, const String &name, int &year, int &
 uint32_t backupExportCsv(BackupStream s, int year, int month, int day, const CsvSink &out); // day = 0: mes completo
 bool backupDeleteMonth(BackupStream s, int year, int month);
 
-void backupHandleSerial(); // Comandos "respaldo ..." por el Monitor serial (desde taskComm)
+// -------- Para los comandos serie (serial_commands.cpp) --------
+bool backupStreamFromName(const char *name, BackupStream &s); // "bme", "ina", "bat", "fan"
+void backupPrintInfo();                                       // Uso y meses con registros de cada flujo

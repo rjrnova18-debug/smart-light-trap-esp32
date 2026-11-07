@@ -8,16 +8,53 @@ Adafruit_INA219 ina219;
 Adafruit_BME280 bme;
 RTC_DS1307 rtc;
 
-void getTime()
+// Lee el RTC y devuelve true solo si la hora es válida. Dos comprobaciones:
+//  1. Que el RTC responda en el bus I2C. Si no responde, rtc.now() (RTClib) no avisa
+//     y arma la fecha con lo que haya en memoria: basura que podría parecer válida.
+//  2. Que la fecha exista (DateTime::isValid()): descarta lecturas corruptas, p. ej. 165:165.
+bool readRtc(DateTime &out)
 {
-  DateTime now = rtc.now();
+  Wire.beginTransmission(RTC_ADDR);
+  if (Wire.endTransmission() != 0)
+    return false;
+  out = rtc.now();
+  return out.isValid();
+}
 
+// Actualiza la hora de systemData. Una lectura fallida (cable flojo, RTC sin
+// respuesta) haría creer que la ventana de la luz está siempre activa o que hay que
+// dormir un tiempo negativo. Por eso:
+//  - lectura válida: actualiza systemData y la hora vuelve a ser confiable;
+//  - lectura inválida: se conserva la última hora buena; tras RTC_MAX_BAD_READS
+//    seguidas la hora deja de ser confiable (rtcAvailable = false) y la trampa pasa a
+//    modo seguro: no opera por horario (ver isInsideWindow()) hasta que el RTC responda.
+bool getTime()
+{
+  static int badReads = 0;
+  DateTime now;
+
+  if (!readRtc(now))
+  {
+    // Se cuenta hasta el límite (y ahí se avisa una sola vez)
+    if (badReads < RTC_MAX_BAD_READS && ++badReads == RTC_MAX_BAD_READS)
+    {
+      systemData.rtcAvailable = false;
+      Serial.println("[ERROR] El RTC no da una hora válida: MODO SEGURO (sin horario) hasta que responda");
+    }
+    return false;
+  }
+
+  if (badReads >= RTC_MAX_BAD_READS)
+    Serial.println("RTC recuperado: se vuelve a operar por horario");
+  badReads = 0;
+  systemData.rtcAvailable = true;
   systemData.hour = now.hour();
   systemData.minute = now.minute();
   systemData.second = now.second();
   systemData.day = now.day();
   systemData.month = now.month();
   systemData.year = now.year();
+  return true;
 }
 
 DateTime systemDateTime()

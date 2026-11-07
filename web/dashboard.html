@@ -46,6 +46,14 @@
                 </div>
             </div>
 
+            <div id="rtcBanner" class="manual-banner" style="display: none;">
+                <span class="manual-banner-icon">🕒</span>
+                <div class="manual-banner-text">
+                    <div class="manual-banner-title">Reloj (RTC) sin hora válida: modo seguro</div>
+                    <div class="manual-banner-subtitle">La trampa no opera por horario: luz y ventiladores apagados (el control manual sigue disponible) y no se registran datos. Duerme y reintenta leer el reloj cada 30 min. Revisa el módulo RTC y su cableado; si responde pero perdió la hora, ajústala en Configuración.</div>
+                </div>
+            </div>
+
             <div id="chargeModeBanner" class="manual-banner" style="display: none;">
                 <span class="manual-banner-icon">🔌</span>
                 <div class="manual-banner-text">
@@ -917,6 +925,9 @@
                 } else {
                     lowBatteryBanner.style.display = 'none';
                 }
+
+                // Modo seguro: sin hora válida del RTC (rtcOk === false; undefined = firmware anterior)
+                document.getElementById('rtcBanner').style.display = data.rtcOk === false ? 'flex' : 'none';
 
                 // Modo solo carga y pantalla OLED (tarjeta "Energía y pantalla")
                 document.getElementById('chargeModeBanner').style.display = data.chargeMode ? 'flex' : 'none';

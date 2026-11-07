@@ -5,6 +5,7 @@
 #include "config.h"
 #include "sensors.h"
 #include "trap.h"
+#include "health.h"
 
 // Por flujo: prefijo del archivo mensual, carpeta en la SD / árbol virtual,
 // tamaño del registro y encabezado del CSV.
@@ -70,7 +71,11 @@ bool backupFormat()
   if (systemData.backupAvailable)
     return false; // montado: para borrar datos se usa "Borrar" por mes o por flujo
   Serial.println("Respaldo interno: formateando a pedido de /admin...");
+  // Formatear borra toda la partición y puede tardar decenas de segundos sin poder
+  // avisar al watchdog: mientras tanto esta tarea sale de la vigilancia.
+  healthUnwatchThisTask();
   bool ok = LittleFS.begin(true, BACKUP_MOUNT_PATH, 5, BACKUP_PARTITION); // formatea si no monta
+  healthWatchThisTask();
   if (ok)
   {
     Preferences prefs;
@@ -205,6 +210,7 @@ static void forEachRecord(BackupStream s, int year, int month,
   size_t n;
   while (keepGoing && (n = f.read(buf, sizeof(buf))) >= len)
   {
+    healthFeed(); // exportar un mes completo (p. ej. por serial) puede tardar decenas de segundos
     for (size_t off = 0; keepGoing && off + len <= n; off += len)
     {
       uint32_t ts;
@@ -434,10 +440,23 @@ void backupCheckSpace()
 }
 
 // ---------------------------------------------------------------------------
-// Comandos por el Monitor serial (vía de extracción si el WiFi falla)
+// Para los comandos serie (ver serial_commands.cpp)
 // ---------------------------------------------------------------------------
 
-static void printBackupInfo()
+bool backupStreamFromName(const char *name, BackupStream &s)
+{
+  for (int i = 0; i < BK_STREAM_COUNT; i++)
+  {
+    if (strcmp(name, STREAM_PREFIX[i]) == 0)
+    {
+      s = (BackupStream)i;
+      return true;
+    }
+  }
+  return false;
+}
+
+void backupPrintInfo()
 {
   if (!systemData.backupAvailable)
   {
@@ -459,68 +478,5 @@ static void printBackupInfo()
       Serial.printf(" %s (%u reg)", month.c_str(), (unsigned)backupMonthRecords((BackupStream)s, y, m));
     }
     Serial.println();
-  }
-  Serial.println("Para descargar: respaldo <bme|ina|bat|fan> [AAAA-MM | AAAA-MM-DD]");
-}
-
-static void runSerialCommand(const char *cmd)
-{
-  char word[16] = "", type[8] = "", when[16] = "";
-  int n = sscanf(cmd, "%15s %7s %15s", word, type, when);
-  if (n < 1)
-    return;
-  if (strcmp(word, "respaldo") != 0)
-  {
-    Serial.println("Comandos: respaldo | respaldo <bme|ina|bat|fan> [AAAA-MM | AAAA-MM-DD]");
-    return;
-  }
-  // Cada comando mantiene despierta la trampa 5 min (igual que el botón del pin 32)
-  forceAwake = true;
-  forceAwakeStart = millis();
-
-  if (n == 1)
-  {
-    printBackupInfo();
-    return;
-  }
-  int stream = -1;
-  for (int s = 0; s < BK_STREAM_COUNT; s++)
-    if (strcmp(type, STREAM_PREFIX[s]) == 0)
-      stream = s;
-  int year = systemData.year, month = systemData.month, day = 0;
-  if (stream < 0 || (n == 3 && sscanf(when, "%4d-%2d-%2d", &year, &month, &day) < 2))
-  {
-    Serial.println("Uso: respaldo <bme|ina|bat|fan> [AAAA-MM | AAAA-MM-DD]");
-    return;
-  }
-  if (!systemData.backupAvailable)
-  {
-    printBackupInfo();
-    return;
-  }
-  Serial.printf("----- %s %04d-%02d%s (CSV) -----\n", STREAM_FOLDER[stream], year, month, day ? " (un día)" : "");
-  uint32_t rows = backupExportCsv((BackupStream)stream, year, month, day, [](const char *data, size_t len)
-                                  { Serial.write((const uint8_t *)data, len); });
-  Serial.printf("----- fin: %u filas -----\n", (unsigned)rows);
-}
-
-void backupHandleSerial()
-{
-  static char line[48];
-  static size_t len = 0;
-  while (Serial.available() > 0)
-  {
-    char c = Serial.read();
-    if (c == '\r')
-      continue;
-    if (c != '\n')
-    {
-      if (len < sizeof(line) - 1)
-        line[len++] = c;
-      continue;
-    }
-    line[len] = '\0';
-    len = 0;
-    runSerialCommand(line);
   }
 }

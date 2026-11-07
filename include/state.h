@@ -20,7 +20,8 @@ struct SystemData
   bool loads[4];      // Estado de las 4 cargas
   bool irSensors[16]; // Estado de los 16 sensores IR
   int areaCounts[4];
-  // Banderas de disponibilidad
+  // Banderas de disponibilidad. rtcAvailable = hay hora confiable (la maneja getTime();
+  // si es false la trampa está en modo seguro y no opera por horario)
   bool rtcAvailable, bmeAvailable, inaAvailable, sdAvailable, oledAvailable;
   bool backupAvailable; // respaldo LittleFS en la flash interna montado
 };
@@ -69,8 +70,7 @@ extern int sdStartH, sdStartM;
 extern int sdEndH, sdEndM;
 
 // -------- Energía, deep sleep y modos --------
-extern bool forceAwake;
-extern unsigned long forceAwakeStart;
+// ("Despierto a la fuerza" está en power.h: se usa desde una interrupción)
 extern bool sampleWake;
 extern bool lowBatteryLock;
 extern bool criticalBatteryLock;

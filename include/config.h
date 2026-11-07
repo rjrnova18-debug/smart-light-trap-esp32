@@ -115,6 +115,23 @@ const float CRIT_BAT_RECONNECT_V = 10.6; // la histéresis evita despertar y vol
 // OLED encendida temporalmente por el botón del pin 35 (ver oledTempOn)
 const unsigned long OLED_TEMP_ON_MS = 120000;
 
+// "Despierto a la fuerza": el botón del pin 32, "Posponer" en el dashboard y los
+// comandos serie mantienen el equipo despierto (y el AP encendido) este tiempo.
+const unsigned long FORCE_AWAKE_MS = 300000; // 5 min
+
+// -------- RELOJ (RTC) --------
+#define RTC_ADDR 0x68 // DS1307 en el bus I2C
+// Lecturas inválidas seguidas (taskUI lee cada ~100 ms) antes de dar la hora por no
+// confiable y pasar a modo seguro: sin hora no se opera por horario (ver getTime()).
+const int RTC_MAX_BAD_READS = 10;
+
+// -------- SALUD DEL FIRMWARE (ver include/health.h) --------
+// Watchdog: si una tarea vigilada no avisa en este tiempo, el ESP32 se reinicia.
+const uint32_t TASK_WDT_TIMEOUT_S = 30;
+// Un firmware recién instalado por OTA queda "a prueba" este tiempo: si se reinicia
+// antes (cuelgue, error, watchdog), el bootloader vuelve solo al firmware anterior.
+const unsigned long OTA_TRIAL_MS = 60000;
+
 // -------- SD CARD --------
 #define SD_CS 5
 const int LOG_EVERY_MIN = 5; // Registro BME/INA/BAT en cada minuto múltiplo de 5 (:00, :05, ...)

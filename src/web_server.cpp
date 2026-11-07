@@ -11,6 +11,8 @@
 #include "sd_files.h"
 #include "backup.h"
 #include "backup_files.h"
+#include "power.h"
+#include "health.h"
 
 // -------- Servidor Web ESP32 --------
 WebServer server(80);
@@ -111,9 +113,12 @@ void handleEstado()
   doc["fanActive"] = operatingWindow_Fan();
 
   // Para el aviso de cierre de conexión (AP) en el dashboard
-  doc["forceAwake"] = forceAwake;
-  long forceAwakeRemainingSec = forceAwake ? max(0L, 300L - (long)((millis() - forceAwakeStart) / 1000)) : 0;
-  doc["forceAwakeRemainingSec"] = forceAwakeRemainingSec;
+  unsigned long forceAwakeLeftMs = forceAwakeRemainingMs();
+  doc["forceAwake"] = forceAwakeLeftMs > 0;
+  doc["forceAwakeRemainingSec"] = forceAwakeLeftMs / 1000;
+
+  // Sin hora confiable del RTC la trampa está en modo seguro (aviso en el dashboard)
+  doc["rtcOk"] = systemData.rtcAvailable;
 
   doc["fanDur"] = FAN_ON_TIME / 60000; // Lo enviamos en minutos al HTML
   doc["threshold"] = AREA_THRESHOLD;
@@ -181,8 +186,7 @@ void handleClearManual()
 
 void handleExtendConnection()
 {
-  forceAwake = true;
-  forceAwakeStart = millis();
+  forceAwakeStartNow();
   server.send(200, "application/json", "{\"message\":\"Conexión extendida 5 minutos\"}");
 }
 
@@ -254,6 +258,9 @@ void handleOTAUpload()
   }
   else if (upload.status == UPLOAD_FILE_WRITE)
   {
+    // Toda la subida (15-30 s) ocurre dentro de una sola llamada a handleClient():
+    // se avisa al watchdog en cada bloque para que no reinicie a mitad de la OTA.
+    healthFeed();
     if (!maintAuthOk)
       return;
     if (Update.write(upload.buf, upload.currentSize) != upload.currentSize)
@@ -327,6 +334,15 @@ void handleControl()
   server.send(200, "text/plain", "OK");
 }
 
+// Horas y minutos de las 5 ventanas: tienen que venir todas en /saveWindows
+static const char *const WINDOW_KEYS[] = {
+    "apMoSH", "apMoSM", "apMoEH", "apMoEM", // AP mañana: inicio (H, M) y fin (H, M)
+    "apEvSH", "apEvSM", "apEvEH", "apEvEM", // AP tarde/noche
+    "ledSH", "ledSM", "ledEH", "ledEM",     // luz
+    "fanSH", "fanSM", "fanEH", "fanEM",     // ventiladores
+    "sdSH", "sdSM", "sdEH", "sdEM",         // ventana extra (SD)
+};
+
 void handleSaveWindows()
 {
   if (!server.hasArg("plain"))
@@ -336,7 +352,23 @@ void handleSaveWindows()
   }
 
   JsonDocument doc;
-  deserializeJson(doc, server.arg("plain"));
+  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok)
+  {
+    server.send(400, "application/json", "{\"error\":\"JSON inválido: no se cambió nada\"}");
+    return;
+  }
+  // Se valida TODO antes de cambiar algo. Antes, una hora que faltaba quedaba en 00:00
+  // y se guardaba en NVS: una ventana 00:00-00:00 dejaba el AP o la luz siempre
+  // encendidos (ahora además cuenta como ventana vacía, ver isInsideWindow()).
+  for (const char *key : WINDOW_KEYS)
+  {
+    if (!doc[key].is<int>())
+    {
+      String error = String("{\"error\":\"Falta o no es un número: ") + key + ". No se cambió nada\"}";
+      server.send(400, "application/json", error);
+      return;
+    }
+  }
 
   // Si el JSON trae estas llaves, actualizamos las variables
   if (!doc["fanDur"].isNull())

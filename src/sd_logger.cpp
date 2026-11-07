@@ -321,6 +321,7 @@ bool sdWritable()
 
 bool loggingAllowed()
 {
-  // Con la batería crítica la SD no se usa, pero el respaldo sigue con las filas BAT
-  return sdWritable() || backupLogAllowed(BK_BAT);
+  // Sin hora confiable (modo seguro) no se registra: las filas tendrían fechas falsas.
+  // Con la batería crítica la SD no se usa, pero el respaldo sigue con las filas BAT.
+  return systemData.rtcAvailable && (sdWritable() || backupLogAllowed(BK_BAT));
 }

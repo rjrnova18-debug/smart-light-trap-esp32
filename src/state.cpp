@@ -2,7 +2,7 @@
 #include "state.h"
 #include "config.h"
 
-SystemData systemData = {0};
+SystemData systemData = {}; // todo en cero / false
 
 QueueHandle_t fanEventQueue;
 SemaphoreHandle_t xI2C_Mutex;
@@ -51,10 +51,6 @@ int fanEndH, fanEndM;
 // despierto); solo sirve como ventana extra para mantenerlo despierto.
 int sdStartH, sdStartM;
 int sdEndH, sdEndM;
-
-// Variable para control de deepsleep
-bool forceAwake = false;
-unsigned long forceAwakeStart = 0;
 
 // true si el próximo despertar por timer es solo de muestreo (ver quickBatterySample())
 RTC_DATA_ATTR bool sampleWake = false; // true si el próximo despertar por timer es solo de muestreo

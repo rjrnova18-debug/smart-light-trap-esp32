@@ -8,11 +8,51 @@
 #include "sd_logger.h"
 #include "backup.h"
 #include "display.h"
+#include "health.h"
 
-// Botón del pin 32: despierta del deep sleep (esp_sleep_enable_ext0_wakeup) Y,
-// mientras el sistema ya está despierto, fuerza el WiFi/AP encendido 5 minutos
-// aunque la ventana horaria esté cerrada (reutiliza el mismo forceAwake que usa
-// el botón "Posponer" del dashboard).
+// ---------------------------------------------------------------------------
+// Despierto a la fuerza (FORCE_AWAKE_MS)
+// ---------------------------------------------------------------------------
+// Lo activan el botón del pin 32 (desde su interrupción, en el núcleo 1), "Posponer"
+// en el dashboard y los comandos serie (desde taskComm, en el núcleo 0). Como se
+// escribe y se lee desde dos núcleos a la vez, las dos variables solo se tocan dentro
+// de una sección crítica: así nunca se lee la bandera nueva con la hora vieja (lo que
+// hacía perder una pulsación del botón).
+//
+// Dura exactamente FORCE_AWAKE_MS desde la última activación y vence sola, sin
+// importar si alguna ventana sigue abierta. OJO: no debe cancelarse solo porque "hay
+// una ventana activa ahora mismo": "Posponer" normalmente se presiona CON la ventana
+// todavía abierta (antes de que cierre), y cancelarlo ahí lo anularía de inmediato.
+static portMUX_TYPE forceAwakeMux = portMUX_INITIALIZER_UNLOCKED;
+static bool forceAwakeOn = false;
+static unsigned long forceAwakeSince = 0;
+
+void IRAM_ATTR forceAwakeStartNow()
+{
+  unsigned long now = millis();
+  portENTER_CRITICAL_SAFE(&forceAwakeMux); // _SAFE: sirve desde una interrupción y desde una tarea
+  forceAwakeOn = true;
+  forceAwakeSince = now;
+  portEXIT_CRITICAL_SAFE(&forceAwakeMux);
+}
+
+unsigned long forceAwakeRemainingMs()
+{
+  portENTER_CRITICAL(&forceAwakeMux);
+  bool on = forceAwakeOn;
+  unsigned long elapsed = millis() - forceAwakeSince;
+  portEXIT_CRITICAL(&forceAwakeMux);
+  return (on && elapsed < FORCE_AWAKE_MS) ? FORCE_AWAKE_MS - elapsed : 0;
+}
+
+bool forceAwakeActive()
+{
+  return forceAwakeRemainingMs() > 0;
+}
+
+// Botón del pin 32: despierta del deep sleep (esp_sleep_enable_ext0_wakeup) y,
+// mientras el sistema ya está despierto, mantiene el WiFi/AP encendido 5 minutos
+// aunque la ventana horaria esté cerrada (igual que "Posponer" del dashboard).
 volatile unsigned long lastWakeButtonTime = 0;
 const unsigned long WAKE_BUTTON_DEBOUNCE = 300; // ms
 
@@ -22,18 +62,20 @@ void IRAM_ATTR WakeButton_rutine()
 
   if (now - lastWakeButtonTime > WAKE_BUTTON_DEBOUNCE)
   {
-    forceAwake = true;
-    forceAwakeStart = now;
+    forceAwakeStartNow();
     lastWakeButtonTime = now;
   }
 }
 
-// Calcula el próximo despertar (inicio de ventana o próxima marca de muestreo
-// :00/:30, lo que llegue primero) y entra en deep sleep. No pide el mutex: lo
-// llaman checkDeepSleep() (con el mutex ya tomado) y quickBatterySample().
-void enterDeepSleep()
+// ---------------------------------------------------------------------------
+// Deep sleep
+// ---------------------------------------------------------------------------
+
+// Segundos hasta el próximo despertar: el inicio de ventana o la próxima marca de
+// muestreo (:00/:30), lo que llegue primero. Pone sampleWake en true si ese despertar
+// es solo para medir la batería (ver quickBatterySample()).
+static long secondsUntilNextWake(const DateTime &now)
 {
-  DateTime now = rtc.now();
   int currentTotal = now.hour() * 60 + now.minute();
 
   // Lista de inicios de ventana (los dos rangos de AP cuentan por separado,
@@ -61,7 +103,34 @@ void enterDeepSleep()
   if (sampleWake)
     minWait = sampleWait;
 
-  long sleepSeconds = (minWait * 60) - now.second();
+  return (minWait * 60L) - now.second();
+}
+
+// Calcula el próximo despertar y entra en deep sleep. No pide el mutex: lo llaman
+// checkDeepSleep() (con el mutex ya tomado), quickBatterySample() y setup().
+void enterDeepSleep()
+{
+  long sleepSeconds;
+  DateTime now;
+  if (readRtc(now))
+  {
+    sleepSeconds = secondsUntilNextWake(now);
+  }
+  else
+  {
+    // Sin hora válida no se sabe cuándo empieza la próxima ventana: se despierta en
+    // SAMPLE_PERIOD_MIN para medir la batería y volver a intentar leer el RTC.
+    Serial.println("[ERROR] RTC sin hora válida: se duerme el periodo de muestreo y se reintenta");
+    sleepSeconds = SAMPLE_PERIOD_MIN * 60L;
+    sampleWake = true;
+  }
+  // Límite de seguridad: un valor negativo convertido a uint64_t sería un sueño
+  // de miles de años (solo el botón lo despertaría).
+  sleepSeconds = constrain(sleepSeconds, 1L, 86400L);
+
+  // Llegar a dormir prueba que el firmware arrancó y funciona: si es una OTA nueva se
+  // confirma ahora, porque despertar sin confirmarla haría volver al firmware anterior.
+  healthConfirmFirmware();
 
   // Configurar interrupciones
   esp_sleep_enable_ext0_wakeup(GPIO_NUM_32, 0); // Despertar por botón (nivel bajo en GPIO32)
@@ -76,18 +145,18 @@ void enterDeepSleep()
 
 // Despertar de muestreo durante el deep sleep (~1 s, sin WiFi, OLED ni tareas).
 // Devuelve false si hay que seguir con el arranque normal: falta el RTC o el INA219,
-// hay una ventana activa, o la protección se liberó dentro de la ventana de la trampa.
-// Sin SD ya no aborta (antes arrancaba el sistema completo cada 30 min y no
-// registraba nada): la fila queda en el respaldo interno.
+// la hora no es válida, hay una ventana activa, o la protección se liberó dentro de
+// la ventana de la trampa. Sin SD ya no aborta (antes arrancaba el sistema completo
+// cada 30 min y no registraba nada): la fila queda en el respaldo interno.
 bool quickBatterySample()
 {
   Wire.begin(SDA_PIN, SCL_PIN);
   if (!rtc.begin() || !ina219.begin())
     return false; // El arranque normal reporta qué periférico falló
-  systemData.rtcAvailable = true;
   systemData.inaAvailable = true;
+  if (!getTime())
+    return false; // Sin hora válida: el arranque normal pasa a modo seguro
 
-  getTime();
   // Se mide antes de montar la SD: con la batería crítica ni se toca
   sampleBatteryNow();
   backupBegin(); // montar solo lee (salvo el primer formateo)
@@ -116,17 +185,6 @@ bool quickBatterySample()
 
 void checkDeepSleep()
 {
-  // El override "forceAwake" (botón físico o "Posponer" del dashboard) dura
-  // exactamente 5 minutos desde que se activó; pasado ese tiempo se limpia solo,
-  // sin importar si alguna ventana sigue abierta o cerrada en ese momento. OJO:
-  // no debe limpiarse solo por "hay una ventana activa ahora mismo", porque
-  // "Posponer" normalmente se presiona CON la ventana todavía abierta (antes de
-  // que cierre) — limpiarlo ahí cancelaría el posponer de inmediato.
-  if (forceAwake && (millis() - forceAwakeStart >= 300000))
-  {
-    forceAwake = false;
-  }
-
   // Verificación de anulaciones manuales (LED y Ventiladores). Con la protección
   // por bajo voltaje activa no cuentan: igual no pueden encender nada.
   bool anyManualOverride = false;
@@ -145,8 +203,8 @@ void checkDeepSleep()
   // Solo entrar en sueño si TODAS las ventanas están cerradas
   if (!anyWakeWindowActive() && !anyManualOverride)
   {
-    // Margen de seguridad si se despertó por botón
-    if (forceAwake && (millis() - forceAwakeStart < 300000))
+    // Despierto a la fuerza (botón, "Posponer" o comando serie): esperar a que venza
+    if (forceAwakeActive())
       return;
 
     Serial.println("Entrando en modo de ahorro de energía...");
